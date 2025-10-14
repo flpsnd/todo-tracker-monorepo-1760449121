@@ -1,0 +1,27 @@
+{
+  "name": "todo-tracker-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:todo": "pnpm --filter todo dev",
+    "dev:tracker": "pnpm --filter tracker dev",
+    "dev:all": "pnpm --parallel --filter './apps/*' dev",
+    "build:todo": "pnpm --filter todo build",
+    "build:tracker": "pnpm --filter tracker build",
+    "build:all": "pnpm --parallel --filter './apps/*' build",
+    "lint": "pnpm --filter './apps/*' lint",
+    "type-check": "pnpm --filter './apps/*' type-check"
+  },
+  "dependencies": {
+    "convex": "^1.27.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@8.15.0"
+}
