@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   title: "Simple Todo App",
   description: "A modern, drag-and-drop todo application",
   icons: {
-    icon: "/todosimple.jpg",
+    icon: "/minimaltodo.jpg",
   },
 }
 

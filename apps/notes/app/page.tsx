@@ -131,7 +131,7 @@ export default function Home() {
               <Input
                 value={formData.title}
                 onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                className="font-mono text-xl font-semibold border-none bg-transparent px-0 focus-visible:ring-0 placeholder:text-muted-foreground"
+                className="font-mono text-2xl font-bold tracking-tight text-balance border-none bg-transparent px-0 focus-visible:ring-0 placeholder:text-muted-foreground"
                 placeholder="Add title"
               />
               {!formData.title && (
@@ -157,14 +157,14 @@ export default function Home() {
           <div className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50">
             <div className="max-w-2xl mx-auto py-8 pb-20">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="font-mono text-xl font-semibold">Saved Notes</h2>
+                <h2 className="text-2xl font-bold tracking-tight text-balance font-mono">Saved Notes</h2>
                 <ThemeToggle />
               </div>
               
               <div className="space-y-8">
                 {notes.length === 0 ? (
-                  <div className="text-center py-12">
-                    <p className="text-muted-foreground font-mono">No saved notes yet.</p>
+                  <div className="rounded-lg border-2 border-dashed border-border p-8 text-center">
+                    <p className="font-mono text-sm text-muted-foreground">No saved notes yet.</p>
                   </div>
                 ) : (
                   notes.map((note) => (

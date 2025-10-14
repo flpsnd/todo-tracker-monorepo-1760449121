@@ -9,10 +9,10 @@ import { Suspense } from "react"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "Simple Notes App",
-  description: "A minimalistic note-taking application",
+  title: "IDE Board",
+  description: "An infinite canvas with draggable sticky notes",
   icons: {
-    icon: "/minimalnotes.jpg",
+    icon: "/minimalboard.jpg",
   },
 }
 

@@ -22,7 +22,7 @@ export const metadata: Metadata = {
   description: "Track your paying customers and revenue goals",
   generator: "v0.app",
   icons: {
-    icon: "/subtracker.jpg",
+    icon: "/minimaltracker.jpg",
   },
 }
 

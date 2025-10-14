@@ -21,6 +21,17 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
 
+  // Notes table for ide-board app
+  notes: defineTable({
+    content: v.string(),
+    color: v.string(),
+    x: v.number(),
+    y: v.number(),
+    userId: v.id("user"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId"]),
+
   // BetterAuth tables (merged from betterAuth/schema.ts)
   user: defineTable({
     name: v.optional(v.string()),
