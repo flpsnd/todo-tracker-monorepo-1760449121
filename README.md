@@ -1,23 +1,39 @@
-# Todo & Tracker Monorepo
+# Productivity Apps Monorepo
 
-A modern monorepo containing two productivity applications built with Next.js and Convex:
+A modern monorepo containing four productivity applications built with Next.js and Convex:
 
 ## 🎯 Applications
 
-### Todo App
-A drag-and-drop todo application featuring:
+### 1. Todo App
+A simple but effective todolist/tasks app with quick organization featuring:
 - **Drag & Drop**: Move tasks between different days
 - **Color-coded Tasks**: Assign colors to your tasks for better organization
 - **Dark/Light Theme**: Toggle between themes
 - **Responsive Design**: Works on all devices
 - **Local-first**: Works offline with sync capabilities
 
-### Tracker App
-A subscription and revenue tracking application featuring:
+### 2. Tracker App
+A simple app for checking/tracking your consistency in a checkbox board featuring:
 - **Customer Management**: Track paying customers with visual grid
 - **Revenue Goals**: Set and monitor revenue milestones
 - **Progress Tracking**: Visual progress bars and milestone indicators
-- **Dark/Light Theme**: Consistent theming with todo app
+- **Dark/Light Theme**: Consistent theming across all apps
+- **Local-first**: Works offline with sync capabilities
+
+### 3. Notes/Journal App
+A very simple but neat note-taking app featuring:
+- **Clean Interface**: Minimalist writing experience
+- **Auto-save**: Notes are automatically saved as you type
+- **Note History**: View and manage all your saved notes
+- **Dark/Light Theme**: Consistent theming across all apps
+- **Local-first**: Works offline with sync capabilities
+
+### 4. IDE-Board (Sticky Notes) App
+A simple canvas app with 'sticky notes' for storing and displaying ideas nicely on a page featuring:
+- **Infinite Canvas**: Drag and place sticky notes anywhere
+- **Visual Organization**: Arrange ideas spatially
+- **Color-coded Notes**: Organize by categories or importance
+- **Dark/Light Theme**: Consistent theming across all apps
 - **Local-first**: Works offline with sync capabilities
 
 ## 🏗️ Monorepo Structure
@@ -26,9 +42,10 @@ A subscription and revenue tracking application featuring:
 /
 ├── apps/
 │   ├── todo/          # Todo application
-│   └── tracker/       # Tracker application
+│   ├── tracker/       # Tracker application
+│   ├── notes/         # Notes/Journal application
+│   └── ide-board/     # IDE-Board (Sticky Notes) application
 ├── convex/            # Shared Convex backend
-├── components/        # Shared UI components
 └── package.json       # Root workspace configuration
 ```
 
@@ -76,12 +93,14 @@ A subscription and revenue tracking application featuring:
 
 3. **Start development servers:**
    ```bash
-   # Start both apps
+   # Start all apps
    pnpm dev:all
    
    # Or start individually
    pnpm dev:todo      # Todo app on http://localhost:3000
    pnpm dev:tracker   # Tracker app on http://localhost:3001
+   pnpm dev:notes     # Notes app on http://localhost:3002
+   pnpm dev:ide-board # IDE-Board app on http://localhost:3003
    ```
 
 ### Available Scripts
@@ -90,12 +109,16 @@ A subscription and revenue tracking application featuring:
 # Development
 pnpm dev:todo        # Start todo app
 pnpm dev:tracker     # Start tracker app
-pnpm dev:all         # Start both apps
+pnpm dev:notes       # Start notes app
+pnpm dev:ide-board   # Start IDE-Board app
+pnpm dev:all         # Start all apps
 
 # Building
 pnpm build:todo      # Build todo app
 pnpm build:tracker   # Build tracker app
-pnpm build:all       # Build both apps
+pnpm build:notes     # Build notes app
+pnpm build:ide-board # Build IDE-Board app
+pnpm build:all       # Build all apps
 
 # Linting & Type Checking
 pnpm lint            # Lint all apps
@@ -104,7 +127,7 @@ pnpm type-check      # Type check all apps
 
 ## 🚀 Production Deployment
 
-This monorepo requires **3 separate deployments**:
+This monorepo requires **5 separate deployments**:
 
 ### 1. Convex Production Deployment
 
@@ -115,10 +138,12 @@ Deploy the shared Convex backend:
 npx convex deploy --prod
 ```
 
-This deploys the shared backend that both apps use for:
+This deploys the shared backend that all apps use for:
 - User authentication
 - Task management (todo app)
 - Subscription tracking (tracker app)
+- Notes management (notes app)
+- Sticky notes management (IDE-Board app)
 - Real-time synchronization
 
 ### 2. Todo App Production Deployment
@@ -141,7 +166,29 @@ cd apps/tracker
 vercel --prod
 ```
 
-**Production URL**: https://tracker-ag18m5j6y-flpsnds-projects.vercel.app
+**Production URL**: https://tracker-fwylhsnxh-flpsnds-projects.vercel.app
+
+### 4. Notes App Production Deployment
+
+Deploy the notes application to Vercel:
+
+```bash
+cd apps/notes
+vercel --prod
+```
+
+**Production URL**: [To be deployed]
+
+### 5. IDE-Board App Production Deployment
+
+Deploy the IDE-Board application to Vercel:
+
+```bash
+cd apps/ide-board
+vercel --prod
+```
+
+**Production URL**: [To be deployed]
 
 ## 🔄 Deployment Flow
 
@@ -164,9 +211,21 @@ vercel --prod
    vercel --prod
    ```
 
+4. **Deploy Notes App:**
+   ```bash
+   cd apps/notes
+   vercel --prod
+   ```
+
+5. **Deploy IDE-Board App:**
+   ```bash
+   cd apps/ide-board
+   vercel --prod
+   ```
+
 ### Development to Production Workflow
 
-1. **Make changes** in either app
+1. **Make changes** in any app
 2. **Test locally** with `pnpm dev:all`
 3. **Deploy Convex** if backend changes were made
 4. **Deploy affected app(s)** to Vercel
@@ -187,6 +246,8 @@ Both apps share the same Convex backend and require:
 Each app has its own Vercel project:
 - **Todo App**: `flpsnds-projects/todo`
 - **Tracker App**: `flpsnds-projects/tracker`
+- **Notes App**: `flpsnds-projects/notes`
+- **IDE-Board App**: `flpsnds-projects/ide-board`
 
 ## 📱 Features
 
@@ -207,9 +268,25 @@ Each app has its own Vercel project:
 - Local-first with cloud sync
 - Milestone indicators (200, 300, 400 customers)
 
+### Notes App Features
+- Clean, distraction-free writing interface
+- Auto-save functionality
+- Note history and management
+- Dark and light theme support
+- Local-first with cloud sync
+- Simple and intuitive design
+
+### IDE-Board App Features
+- Infinite canvas for sticky notes
+- Drag and drop note placement
+- Color-coded sticky notes
+- Visual idea organization
+- Dark and light theme support
+- Local-first with cloud sync
+
 ## 🎨 Design System
 
-Both apps share a consistent design system:
+All four apps share a consistent design system:
 - **Minimalistic UI** - Clean, distraction-free interface
 - **No shadows** - Flat design aesthetic
 - **Consistent theming** - Shared color palette
@@ -218,7 +295,7 @@ Both apps share a consistent design system:
 
 ## 🔐 Authentication
 
-Both apps use Better Auth with:
+All apps use Better Auth with:
 - Email/password authentication
 - Session management
 - Local-first data with cloud sync

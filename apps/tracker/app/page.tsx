@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useQuery, useMutation } from "convex/react"
-import { api } from "../../../convex/_generated/api"
+import { api } from "../convex/_generated/api"
 import { authClient } from "@/lib/auth-client"
 import { loadLocalSubscriptions, saveLocalSubscriptions } from "@/lib/local-storage"
 import { Card } from "@/components/ui/card"

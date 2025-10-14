@@ -9,7 +9,7 @@ import { Suspense } from "react"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "Simple Todo App",
+  title: "Tasks",
   description: "A modern, drag-and-drop todo application",
   icons: {
     icon: "/minimaltodo.jpg",

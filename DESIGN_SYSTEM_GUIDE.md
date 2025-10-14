@@ -257,9 +257,7 @@ const TASK_COLORS = [
 
 ### **Shadows**
 ```css
-/* Subtle shadows */
-.shadow-xs { box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); }
-.shadow-lg { box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); }
+No shadows 
 ```
 
 ---

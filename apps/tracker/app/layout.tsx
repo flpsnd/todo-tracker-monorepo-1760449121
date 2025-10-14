@@ -18,7 +18,7 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "Subscription Tracker",
+  title: "Tracker",
   description: "Track your paying customers and revenue goals",
   generator: "v0.app",
   icons: {
