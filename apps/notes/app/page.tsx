@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ChevronDown, Edit, Trash2, Save, X } from "lucide-react"
+import { ChevronDown, Edit, Trash2, Save, X, ArrowLeft } from "lucide-react"
 import { AnimatePresence } from "framer-motion"
 import { authClient } from "@/lib/auth-client"
 import { loadLocalNotes, saveLocalNotes, type Note } from "@/lib/local-storage"
@@ -14,6 +14,8 @@ export default function Home() {
   const [notes, setNotes] = useState<Note[]>([])
   const [isFormOpen, setIsFormOpen] = useState(true)
   const [editingNote, setEditingNote] = useState<string | null>(null)
+  const [viewingNote, setViewingNote] = useState<Note | null>(null)
+  const [isFullPageView, setIsFullPageView] = useState(false)
   const [formData, setFormData] = useState({ title: "", content: "" })
   const [hasInitialized, setHasInitialized] = useState(false)
 
@@ -63,6 +65,12 @@ export default function Home() {
     const updatedNotes = notes.filter(note => note.id !== noteId)
     setNotes(updatedNotes)
     saveLocalNotes(updatedNotes)
+    
+    // If we're viewing the deleted note, go back to list
+    if (viewingNote?.id === noteId) {
+      setIsFullPageView(false)
+      setViewingNote(null)
+    }
   }
 
   const startEditing = (note: Note) => {
@@ -87,6 +95,35 @@ export default function Home() {
     setFormData({ title: "", content: "" })
   }
 
+  const openNote = (note: Note) => {
+    setViewingNote(note)
+    setIsFullPageView(true)
+    setFormData({ title: note.title, content: note.content })
+  }
+
+  const saveFullPageNote = () => {
+    if (!viewingNote) return
+    
+    updateNote(viewingNote.id, {
+      title: formData.title.trim() || "Untitled",
+      content: formData.content.trim(),
+    })
+    
+    // Update the viewing note with new data
+    setViewingNote({
+      ...viewingNote,
+      title: formData.title.trim() || "Untitled",
+      content: formData.content.trim(),
+      updatedAt: Date.now(),
+    })
+  }
+
+  const goBackToList = () => {
+    setIsFullPageView(false)
+    setViewingNote(null)
+    setFormData({ title: "", content: "" })
+  }
+
   const formatDate = (timestamp: number) => {
     return new Date(timestamp).toLocaleDateString("en-US", {
       month: "short",
@@ -102,6 +139,63 @@ export default function Home() {
     return content.substring(0, maxLength) + "..."
   }
 
+  // Full page note view
+  if (isFullPageView && viewingNote) {
+    return (
+      <main className="min-h-screen bg-background">
+        {/* Header */}
+        <div className="sticky top-0 bg-background/95 backdrop-blur-sm border-b border-border/50 z-10">
+          <div className="max-w-4xl mx-auto px-8 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <Button
+                  variant="ghost"
+                  onClick={goBackToList}
+                  className="font-mono"
+                >
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Back to notes
+                </Button>
+                <Input
+                  value={formData.title}
+                  onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                  className="font-mono text-xl font-semibold border-none bg-transparent px-0 focus-visible:ring-0"
+                  placeholder="Untitled"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Button onClick={saveFullPageNote} className="font-mono">
+                  <Save className="h-4 w-4 mr-2" />
+                  Save
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => deleteNote(viewingNote.id)}
+                  className="font-mono text-destructive hover:text-destructive-foreground hover:bg-destructive"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete
+                </Button>
+                <ThemeToggle />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Full page content */}
+        <div className="max-w-4xl mx-auto px-8 py-8">
+          <Textarea
+            value={formData.content}
+            onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
+            className="min-h-[calc(100vh-200px)] font-mono text-base leading-relaxed border-none bg-transparent resize-none focus-visible:ring-0 p-0"
+            placeholder="Start writing your note..."
+          />
+        </div>
+      </main>
+    )
+  }
+
+  // List view
   return (
     <main className="min-h-screen bg-background p-8">
       <div className="mx-auto max-w-2xl space-y-6">
@@ -137,19 +231,19 @@ export default function Home() {
         {/* Note Form */}
         <AnimatePresence>
           {isFormOpen && (
-            <div className="space-y-4 p-6 border border-border rounded-lg bg-card">
+            <div className="space-y-4">
               <div className="space-y-4">
                 <Input
                   placeholder="Enter note title"
                   value={formData.title}
                   onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                  className="font-mono"
+                  className="font-mono border-none bg-transparent px-0 text-xl font-semibold focus-visible:ring-0"
                 />
                 <Textarea
                   placeholder="Start writing your note..."
                   value={formData.content}
                   onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
-                  className="min-h-[200px] font-mono resize-none"
+                  className="min-h-[200px] font-mono resize-none border-none bg-transparent focus-visible:ring-0"
                 />
                 <div className="flex gap-2">
                   {editingNote ? (
@@ -184,26 +278,33 @@ export default function Home() {
             notes.map((note) => (
               <div
                 key={note.id}
-                className="border border-border rounded-lg p-6 bg-card hover:bg-accent/50 transition-colors"
+                className="p-6 hover:bg-accent/30 transition-colors cursor-pointer group"
+                onClick={() => openNote(note)}
               >
                 <div className="space-y-3">
                   <div className="flex items-start justify-between">
                     <h3 className="font-mono text-lg font-semibold leading-tight">
                       {note.title}
                     </h3>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
-                        onClick={() => startEditing(note)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          startEditing(note)
+                        }}
                         className="font-mono"
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
-                        onClick={() => deleteNote(note.id)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          deleteNote(note.id)
+                        }}
                         className="font-mono text-destructive hover:text-destructive-foreground hover:bg-destructive"
                       >
                         <Trash2 className="h-4 w-4" />
