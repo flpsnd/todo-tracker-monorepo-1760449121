@@ -131,7 +131,7 @@ export default function Home() {
               <Input
                 value={formData.title}
                 onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                className="font-mono text-2xl font-semibold border-none bg-transparent px-0 focus-visible:ring-0 placeholder:text-muted-foreground"
+                className="font-mono text-xl font-semibold border-none bg-transparent px-0 focus-visible:ring-0 placeholder:text-muted-foreground"
                 placeholder="Add title"
               />
               {!formData.title && (
@@ -158,17 +158,7 @@ export default function Home() {
             <div className="max-w-2xl mx-auto py-8 pb-20">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="font-mono text-xl font-semibold">Saved Notes</h2>
-                <div className="flex items-center gap-2">
-                  <ThemeToggle />
-                  <Button
-                    variant="ghost"
-                    onClick={() => setShowHistory(false)}
-                    className="font-mono"
-                  >
-                    <X className="h-4 w-4 mr-2" />
-                    Close
-                  </Button>
-                </div>
+                <ThemeToggle />
               </div>
               
               <div className="space-y-8">
