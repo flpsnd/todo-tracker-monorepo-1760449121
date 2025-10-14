@@ -56,3 +56,4 @@ interface Note {
 ```
 
 All data is stored in localStorage with the key `"notes-local"`.
+

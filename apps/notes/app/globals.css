@@ -133,3 +133,25 @@
     overflow: hidden;
   }
 }
+
+@layer components {
+  .note-item {
+    position: relative;
+  }
+  
+  .note-item::before {
+    content: '';
+    position: absolute;
+    left: -10px;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background-color: hsl(var(--border));
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+  
+  .note-item:hover::before {
+    opacity: 1;
+  }
+}

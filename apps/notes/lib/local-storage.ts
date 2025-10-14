@@ -36,3 +36,4 @@ export function clearLocalNotes(): void {
     console.error("Failed to clear local notes:", error);
   }
 }
+

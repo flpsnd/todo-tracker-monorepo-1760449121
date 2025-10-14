@@ -123,19 +123,22 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-background">
       {/* Main writing area */}
-      <div className="max-w-2xl mx-auto px-8 py-8">
+      <div className="max-w-2xl mx-auto py-8">
         <div className="space-y-6">
-          {/* Title input */}
-          <div className="relative">
-            <Input
-              value={formData.title}
-              onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-              className="font-mono text-2xl font-semibold border-none bg-transparent px-0 focus-visible:ring-0 placeholder:text-muted-foreground"
-              placeholder="Add title"
-            />
-            {!formData.title && (
-              <div className="absolute bottom-0 left-0 w-[100px] h-px bg-border"></div>
-            )}
+          {/* Title input with theme toggle */}
+          <div className="flex items-center justify-between">
+            <div className="relative flex-1">
+              <Input
+                value={formData.title}
+                onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                className="font-mono text-2xl font-semibold border-none bg-transparent px-0 focus-visible:ring-0 placeholder:text-muted-foreground"
+                placeholder="Add title"
+              />
+              {!formData.title && (
+                <div className="absolute bottom-0 left-0 w-[100px] h-px bg-border"></div>
+              )}
+            </div>
+            <ThemeToggle />
           </div>
           
           {/* Content textarea */}
@@ -152,17 +155,20 @@ export default function Home() {
       <AnimatePresence>
         {showHistory && (
           <div className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50">
-            <div className="max-w-2xl mx-auto px-8 py-8 pb-20">
+            <div className="max-w-2xl mx-auto py-8 pb-20">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="font-mono text-xl font-semibold">Saved Notes</h2>
-                <Button
-                  variant="ghost"
-                  onClick={() => setShowHistory(false)}
-                  className="font-mono"
-                >
-                  <X className="h-4 w-4 mr-2" />
-                  Close
-                </Button>
+                <div className="flex items-center gap-2">
+                  <ThemeToggle />
+                  <Button
+                    variant="ghost"
+                    onClick={() => setShowHistory(false)}
+                    className="font-mono"
+                  >
+                    <X className="h-4 w-4 mr-2" />
+                    Close
+                  </Button>
+                </div>
               </div>
               
               <div className="space-y-8">
@@ -174,7 +180,7 @@ export default function Home() {
                   notes.map((note) => (
                     <div
                       key={note.id}
-                      className="hover:bg-accent/30 transition-colors cursor-pointer group"
+                      className="note-item hover:bg-accent/30 transition-colors cursor-pointer group"
                       onClick={() => openNote(note)}
                     >
                       <div className="space-y-2">
@@ -234,7 +240,6 @@ export default function Home() {
                       <Plus className="h-4 w-4 mr-2" />
                       New note
                     </Button>
-                    <ThemeToggle />
                   </div>
                 </div>
               </div>
@@ -267,7 +272,6 @@ export default function Home() {
                 <Plus className="h-4 w-4 mr-2" />
                 New note
               </Button>
-              <ThemeToggle />
             </div>
           </div>
         </div>
