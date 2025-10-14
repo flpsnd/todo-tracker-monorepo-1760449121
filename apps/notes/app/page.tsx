@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Plus, Eye, EyeOff, Trash2, X } from "lucide-react"
+import { Plus, Eye, EyeOff, Trash2, X, ChevronLeft } from "lucide-react"
 import { AnimatePresence } from "framer-motion"
 import { authClient } from "@/lib/auth-client"
 import { loadLocalNotes, saveLocalNotes, type Note } from "@/lib/local-storage"
@@ -217,8 +217,10 @@ export default function Home() {
                       className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2"
                       aria-label="Back to writing"
                     >
-                      <X className="h-4 w-4" />
-                      <span className="font-mono text-sm">Back</span>
+                      <ChevronLeft className="h-4 w-4" />
+                      <span className="font-mono text-sm">
+                        {currentNote?.title || "Back"}
+                      </span>
                     </button>
                   </div>
                   <div className="flex items-center gap-2">
@@ -249,8 +251,19 @@ export default function Home() {
                 className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2"
                 aria-label="Toggle notes history visibility"
               >
-                {showHistory ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                <span className="font-mono text-sm">{showHistory ? "Back" : "All notes"}</span>
+                {showHistory ? (
+                  <>
+                    <ChevronLeft className="h-4 w-4" />
+                    <span className="font-mono text-sm">
+                      {currentNote?.title || "Back"}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Eye className="h-4 w-4" />
+                    <span className="font-mono text-sm">All notes</span>
+                  </>
+                )}
               </button>
             </div>
             <div className="flex items-center gap-2">
