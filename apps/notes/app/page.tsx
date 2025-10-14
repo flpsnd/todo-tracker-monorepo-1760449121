@@ -133,7 +133,9 @@ export default function Home() {
               className="font-mono text-2xl font-semibold border-none bg-transparent px-0 focus-visible:ring-0 placeholder:text-muted-foreground"
               placeholder="Add title"
             />
-            <div className="absolute bottom-0 left-0 w-[100px] h-px bg-border"></div>
+            {!formData.title && (
+              <div className="absolute bottom-0 left-0 w-[100px] h-px bg-border"></div>
+            )}
           </div>
           
           {/* Content textarea */}
@@ -150,7 +152,7 @@ export default function Home() {
       <AnimatePresence>
         {showHistory && (
           <div className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50">
-            <div className="max-w-2xl mx-auto px-8 py-8">
+            <div className="max-w-2xl mx-auto px-8 py-8 pb-20">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="font-mono text-xl font-semibold">Saved Notes</h2>
                 <Button
@@ -163,7 +165,7 @@ export default function Home() {
                 </Button>
               </div>
               
-              <div className="space-y-2">
+              <div className="space-y-8">
                 {notes.length === 0 ? (
                   <div className="text-center py-12">
                     <p className="text-muted-foreground font-mono">No saved notes yet.</p>
@@ -208,6 +210,35 @@ export default function Home() {
                 )}
               </div>
             </div>
+            
+            {/* Sticky Bottom UI for History */}
+            <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-40">
+              <div className="mx-auto max-w-2xl">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setShowHistory(false)}
+                      className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2"
+                      aria-label="Back to writing"
+                    >
+                      <X className="h-4 w-4" />
+                      <span className="font-mono text-sm">Back</span>
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={createNewNote}
+                      className="font-mono"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      New note
+                    </Button>
+                    <ThemeToggle />
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </AnimatePresence>
@@ -218,23 +249,24 @@ export default function Home() {
         <div className="mx-auto max-w-2xl">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <Button
-                onClick={createNewNote}
-                className="font-mono"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                New note
-              </Button>
-            </div>
-            <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowHistory(!showHistory)}
                 className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2"
                 aria-label="Toggle notes history visibility"
               >
                 {showHistory ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                <span className="font-mono text-sm">{showHistory ? "Hide" : "Show"} history</span>
+                <span className="font-mono text-sm">{showHistory ? "Back" : "All notes"}</span>
               </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={createNewNote}
+                className="font-mono"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                New note
+              </Button>
               <ThemeToggle />
             </div>
           </div>
