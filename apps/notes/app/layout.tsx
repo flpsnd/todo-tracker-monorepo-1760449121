@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   title: "Simple Notes App",
   description: "A minimalistic note-taking application",
   icons: {
-    icon: "/docs.png",
+    icon: "/notes.jpg",
   },
 }
 

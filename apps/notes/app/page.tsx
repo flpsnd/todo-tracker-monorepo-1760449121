@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { ChevronDown, Edit, Trash2, Save, X, ArrowLeft } from "lucide-react"
+import { useState, useEffect, useCallback } from "react"
+import { Plus, Eye, EyeOff, Trash2, Edit, X, ArrowLeft } from "lucide-react"
 import { AnimatePresence } from "framer-motion"
 import { authClient } from "@/lib/auth-client"
 import { loadLocalNotes, saveLocalNotes, type Note } from "@/lib/local-storage"
@@ -12,10 +12,9 @@ import { Textarea } from "@/components/ui/textarea"
 
 export default function Home() {
   const [notes, setNotes] = useState<Note[]>([])
-  const [isFormOpen, setIsFormOpen] = useState(true)
+  const [currentNote, setCurrentNote] = useState<Note | null>(null)
+  const [showHistory, setShowHistory] = useState(false)
   const [editingNote, setEditingNote] = useState<string | null>(null)
-  const [viewingNote, setViewingNote] = useState<Note | null>(null)
-  const [isFullPageView, setIsFullPageView] = useState(false)
   const [formData, setFormData] = useState({ title: "", content: "" })
   const [hasInitialized, setHasInitialized] = useState(false)
 
@@ -32,33 +31,66 @@ export default function Home() {
     setHasInitialized(true)
   }, [hasInitialized])
 
-  const addNote = () => {
+  // Auto-save function
+  const autoSave = useCallback(() => {
     if (!formData.title.trim() && !formData.content.trim()) return
 
-    const newNote: Note = {
-      id: crypto.randomUUID(),
+    const noteData = {
       title: formData.title.trim() || "Untitled",
       content: formData.content.trim(),
-      createdAt: Date.now(),
       updatedAt: Date.now(),
     }
 
-    const updatedNotes = [newNote, ...notes]
-    setNotes(updatedNotes)
-    saveLocalNotes(updatedNotes)
+    if (currentNote) {
+      // Update existing note
+      const updatedNote = { ...currentNote, ...noteData }
+      setCurrentNote(updatedNote)
+      
+      const updatedNotes = notes.map((note) => 
+        note.id === currentNote.id ? updatedNote : note
+      )
+      setNotes(updatedNotes)
+      saveLocalNotes(updatedNotes)
+    } else {
+      // Create new note
+      const newNote: Note = {
+        id: crypto.randomUUID(),
+        ...noteData,
+        createdAt: Date.now(),
+      }
+      
+      setCurrentNote(newNote)
+      const updatedNotes = [newNote, ...notes]
+      setNotes(updatedNotes)
+      saveLocalNotes(updatedNotes)
+    }
+  }, [formData, currentNote, notes])
+
+  // Auto-save on every change
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      autoSave()
+    }, 500) // Debounce auto-save by 500ms
+
+    return () => clearTimeout(timeoutId)
+  }, [formData, autoSave])
+
+  const createNewNote = () => {
+    // Save current note if it has content
+    if (currentNote && (formData.title.trim() || formData.content.trim())) {
+      autoSave()
+    }
     
-    // Reset form
+    // Reset to new note
+    setCurrentNote(null)
     setFormData({ title: "", content: "" })
+    setShowHistory(false)
   }
 
-  const updateNote = (noteId: string, updates: Partial<Pick<Note, 'title' | 'content'>>) => {
-    const updatedNotes = notes.map((note) => 
-      note.id === noteId 
-        ? { ...note, ...updates, updatedAt: Date.now() }
-        : note
-    )
-    setNotes(updatedNotes)
-    saveLocalNotes(updatedNotes)
+  const openNote = (note: Note) => {
+    setCurrentNote(note)
+    setFormData({ title: note.title, content: note.content })
+    setShowHistory(false)
   }
 
   const deleteNote = (noteId: string) => {
@@ -66,10 +98,10 @@ export default function Home() {
     setNotes(updatedNotes)
     saveLocalNotes(updatedNotes)
     
-    // If we're viewing the deleted note, go back to list
-    if (viewingNote?.id === noteId) {
-      setIsFullPageView(false)
-      setViewingNote(null)
+    // If we're viewing the deleted note, create a new one
+    if (currentNote?.id === noteId) {
+      setCurrentNote(null)
+      setFormData({ title: "", content: "" })
     }
   }
 
@@ -81,10 +113,13 @@ export default function Home() {
   const saveEdit = () => {
     if (!editingNote) return
     
-    updateNote(editingNote, {
-      title: formData.title.trim() || "Untitled",
-      content: formData.content.trim(),
-    })
+    const updatedNotes = notes.map((note) => 
+      note.id === editingNote 
+        ? { ...note, title: formData.title.trim() || "Untitled", content: formData.content.trim(), updatedAt: Date.now() }
+        : note
+    )
+    setNotes(updatedNotes)
+    saveLocalNotes(updatedNotes)
     
     setEditingNote(null)
     setFormData({ title: "", content: "" })
@@ -92,35 +127,6 @@ export default function Home() {
 
   const cancelEdit = () => {
     setEditingNote(null)
-    setFormData({ title: "", content: "" })
-  }
-
-  const openNote = (note: Note) => {
-    setViewingNote(note)
-    setIsFullPageView(true)
-    setFormData({ title: note.title, content: note.content })
-  }
-
-  const saveFullPageNote = () => {
-    if (!viewingNote) return
-    
-    updateNote(viewingNote.id, {
-      title: formData.title.trim() || "Untitled",
-      content: formData.content.trim(),
-    })
-    
-    // Update the viewing note with new data
-    setViewingNote({
-      ...viewingNote,
-      title: formData.title.trim() || "Untitled",
-      content: formData.content.trim(),
-      updatedAt: Date.now(),
-    })
-  }
-
-  const goBackToList = () => {
-    setIsFullPageView(false)
-    setViewingNote(null)
     setFormData({ title: "", content: "" })
   }
 
@@ -139,193 +145,178 @@ export default function Home() {
     return content.substring(0, maxLength) + "..."
   }
 
-  // Full page note view
-  if (isFullPageView && viewingNote) {
-    return (
-      <main className="min-h-screen bg-background">
-        {/* Header */}
-        <div className="sticky top-0 bg-background/95 backdrop-blur-sm border-b border-border/50 z-10">
-          <div className="max-w-4xl mx-auto px-8 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <Button
-                  variant="ghost"
-                  onClick={goBackToList}
-                  className="font-mono"
-                >
-                  <ArrowLeft className="h-4 w-4 mr-2" />
-                  Back to notes
-                </Button>
-                <Input
-                  value={formData.title}
-                  onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                  className="font-mono text-xl font-semibold border-none bg-transparent px-0 focus-visible:ring-0"
-                  placeholder="Untitled"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <Button onClick={saveFullPageNote} className="font-mono">
-                  <Save className="h-4 w-4 mr-2" />
-                  Save
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => deleteNote(viewingNote.id)}
-                  className="font-mono text-destructive hover:text-destructive-foreground hover:bg-destructive"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete
-                </Button>
-                <ThemeToggle />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Full page content */}
-        <div className="max-w-4xl mx-auto px-8 py-8">
+  return (
+    <main className="min-h-screen bg-background">
+      {/* Main writing area */}
+      <div className="max-w-4xl mx-auto px-8 py-8">
+        <div className="space-y-6">
+          {/* Title input */}
+          <Input
+            value={formData.title}
+            onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+            className="font-mono text-2xl font-semibold border-none bg-transparent px-0 focus-visible:ring-0 placeholder:text-muted-foreground"
+            placeholder="Untitled"
+          />
+          
+          {/* Content textarea */}
           <Textarea
             value={formData.content}
             onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
-            className="min-h-[calc(100vh-200px)] font-mono text-base leading-relaxed border-none bg-transparent resize-none focus-visible:ring-0 p-0"
+            className="min-h-[calc(100vh-300px)] font-mono text-base leading-relaxed border-none bg-transparent resize-none focus-visible:ring-0 p-0 placeholder:text-muted-foreground"
             placeholder="Start writing your note..."
           />
         </div>
-      </main>
-    )
-  }
+      </div>
 
-  // List view
-  return (
-    <main className="min-h-screen bg-background p-8">
-      <div className="mx-auto max-w-2xl space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <button 
-            onClick={() => setIsFormOpen(!isFormOpen)}
-            className="flex items-center gap-2 font-mono text-2xl font-semibold hover:opacity-80 transition-opacity"
-          >
-            <span>Create new note</span>
-            <ChevronDown className={`h-6 w-6 transition-transform duration-200 ${isFormOpen ? "rotate-180" : ""}`} />
-          </button>
-          <div className="flex items-center gap-2">
-            {session?.user ? (
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-sm text-muted-foreground">{session.user.email}</span>
-                <button
-                  onClick={() => authClient.signOut()}
-                  className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm"
+      {/* History panel */}
+      <AnimatePresence>
+        {showHistory && (
+          <div className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50">
+            <div className="max-w-2xl mx-auto px-8 py-8">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="font-mono text-xl font-semibold">Saved Notes</h2>
+                <Button
+                  variant="ghost"
+                  onClick={() => setShowHistory(false)}
+                  className="font-mono"
                 >
-                  Sign out
-                </button>
+                  <X className="h-4 w-4 mr-2" />
+                  Close
+                </Button>
               </div>
-            ) : (
-              <button className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm">
-                Sign in
-              </button>
-            )}
-            <ThemeToggle />
-          </div>
-        </div>
-
-        {/* Note Form */}
-        <AnimatePresence>
-          {isFormOpen && (
-            <div className="space-y-4">
+              
               <div className="space-y-4">
+                {notes.length === 0 ? (
+                  <div className="text-center py-12">
+                    <p className="text-muted-foreground font-mono">No saved notes yet.</p>
+                  </div>
+                ) : (
+                  notes.map((note) => (
+                    <div
+                      key={note.id}
+                      className="p-6 hover:bg-accent/30 transition-colors cursor-pointer group"
+                      onClick={() => openNote(note)}
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between">
+                          <h3 className="font-mono text-lg font-semibold leading-tight">
+                            {note.title}
+                          </h3>
+                          <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                startEditing(note)
+                              }}
+                              className="font-mono"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                deleteNote(note.id)
+                              }}
+                              className="font-mono text-destructive hover:text-destructive-foreground hover:bg-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                        
+                        <div className="font-mono text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                          {truncateContent(note.content)}
+                        </div>
+                        
+                        <div className="flex items-center justify-between text-xs text-muted-foreground font-mono">
+                          <span>Created {formatDate(note.createdAt)}</span>
+                          {note.updatedAt !== note.createdAt && (
+                            <span>Updated {formatDate(note.updatedAt)}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit modal */}
+      <AnimatePresence>
+        {editingNote && (
+          <div className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50">
+            <div className="max-w-2xl mx-auto px-8 py-8">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-mono text-xl font-semibold">Edit Note</h2>
+                  <Button
+                    variant="ghost"
+                    onClick={cancelEdit}
+                    className="font-mono"
+                  >
+                    <X className="h-4 w-4 mr-2" />
+                    Cancel
+                  </Button>
+                </div>
+                
                 <Input
                   placeholder="Enter note title"
                   value={formData.title}
                   onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                  className="font-mono border-none bg-transparent px-0 text-xl font-semibold focus-visible:ring-0"
+                  className="font-mono"
                 />
                 <Textarea
                   placeholder="Start writing your note..."
                   value={formData.content}
                   onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
-                  className="min-h-[200px] font-mono resize-none border-none bg-transparent focus-visible:ring-0"
+                  className="min-h-[300px] font-mono resize-none"
                 />
                 <div className="flex gap-2">
-                  {editingNote ? (
-                    <>
-                      <Button onClick={saveEdit} className="font-mono">
-                        <Save className="h-4 w-4 mr-2" />
-                        Save Changes
-                      </Button>
-                      <Button variant="outline" onClick={cancelEdit} className="font-mono">
-                        <X className="h-4 w-4 mr-2" />
-                        Cancel
-                      </Button>
-                    </>
-                  ) : (
-                    <Button onClick={addNote} className="font-mono">
-                      Save Note
-                    </Button>
-                  )}
+                  <Button onClick={saveEdit} className="font-mono">
+                    Save Changes
+                  </Button>
+                  <Button variant="outline" onClick={cancelEdit} className="font-mono">
+                    Cancel
+                  </Button>
                 </div>
               </div>
             </div>
-          )}
-        </AnimatePresence>
+          </div>
+        )}
+      </AnimatePresence>
 
-        {/* Notes List */}
-        <div className="space-y-4">
-          {notes.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground font-mono">No notes yet. Create your first note above.</p>
-            </div>
-          ) : (
-            notes.map((note) => (
-              <div
-                key={note.id}
-                className="p-6 hover:bg-accent/30 transition-colors cursor-pointer group"
-                onClick={() => openNote(note)}
+      {/* Sticky Bottom UI */}
+      <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-40">
+        <div className="mx-auto max-w-2xl">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={createNewNote}
+                className="font-mono"
               >
-                <div className="space-y-3">
-                  <div className="flex items-start justify-between">
-                    <h3 className="font-mono text-lg font-semibold leading-tight">
-                      {note.title}
-                    </h3>
-                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          startEditing(note)
-                        }}
-                        className="font-mono"
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          deleteNote(note.id)
-                        }}
-                        className="font-mono text-destructive hover:text-destructive-foreground hover:bg-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                  
-                  <div className="font-mono text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                    {truncateContent(note.content)}
-                  </div>
-                  
-                  <div className="flex items-center justify-between text-xs text-muted-foreground font-mono">
-                    <span>Created {formatDate(note.createdAt)}</span>
-                    {note.updatedAt !== note.createdAt && (
-                      <span>Updated {formatDate(note.updatedAt)}</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
+                <Plus className="h-4 w-4 mr-2" />
+                New note
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2"
+                aria-label="Toggle notes history visibility"
+              >
+                {showHistory ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                <span className="font-mono text-sm">{showHistory ? "Hide" : "Show"} history</span>
+              </button>
+              <ThemeToggle />
+            </div>
+          </div>
         </div>
       </div>
     </main>
