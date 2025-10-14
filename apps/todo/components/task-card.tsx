@@ -159,7 +159,7 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
           task.completed ? "opacity-30" : "opacity-100"
         } ${
           isSelectMode 
-            ? `cursor-pointer hover:scale-[1.02] ${isSelected ? "ring-2 ring-blue-500 ring-offset-2" : ""}` 
+            ? `cursor-pointer hover:scale-[1.02] ${isSelected ? "ring-2 ring-red-500 ring-offset-2" : ""}` 
             : ""
         }`}
         style={{ backgroundColor: task.color }}
@@ -171,16 +171,12 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
           {/* Title row with checkbox */}
           <div className="flex items-center gap-3">
             {isSelectMode ? (
-              <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                isSelected 
-                  ? "bg-blue-500 border-blue-500" 
-                  : "border-gray-300 hover:border-blue-400"
-              }`}>
-                {isSelected && (
-                  <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
-                )}
+              <div onClick={(e) => e.stopPropagation()}>
+                <CustomCheckbox
+                  checked={isSelected}
+                  onChange={() => onSelect?.(task.id)}
+                  variant="red"
+                />
               </div>
             ) : (
               <CustomCheckbox
@@ -232,16 +228,22 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
               </p>
             )
           ) : (
-            <p 
-              className={`font-mono text-sm text-black/40 cursor-pointer hover:bg-black/5 rounded px-1 py-0.5 transition-all duration-200 ease-in-out ml-8 italic ${
-                isHovered 
-                  ? "opacity-100 h-auto" 
-                  : "opacity-0 h-0 overflow-hidden"
-              }`}
-              onClick={() => startEditing('description')}
-            >
-              Enter description
-            </p>
+            !isSelectMode && (
+              <div 
+                className={`ml-8 transition-all duration-200 ease-in-out overflow-hidden ${
+                  isHovered 
+                    ? "max-h-8 opacity-100" 
+                    : "max-h-0 opacity-0"
+                }`}
+              >
+                <p 
+                  className="font-mono text-sm text-black/40 cursor-pointer hover:bg-black/5 rounded px-1 py-0.5 italic"
+                  onClick={() => startEditing('description')}
+                >
+                  Enter description
+                </p>
+              </div>
+            )
           )}
         </div>
       </div>

@@ -307,20 +307,20 @@ export default function Home() {
     const taskToDelete = tasks.find(t => t.id === taskId)
     if (!taskToDelete) return
     
-    // Remove from visible tasks immediately (frontend only)
+    // Remove from visible tasks immediately
     const updatedTasks = tasks.filter(t => t.id !== taskId)
     setTasks(updatedTasks)
+    
+    // Remove from localStorage immediately to persist deletion
+    const currentTasks = loadLocalTasks()
+    const filteredTasks = currentTasks.filter(t => t.id !== taskId)
+    saveLocalTasks(filteredTasks)
     
     // Add to localStorage deleted tasks for restore functionality
     addDeletedTask(taskToDelete)
     
-    // Set 60s timeout for permanent deletion
+    // Set 60s timeout for permanent deletion from deleted tasks and Convex
     const timeoutId = setTimeout(() => {
-      // Now remove from localStorage and Convex
-      const currentTasks = loadLocalTasks()
-      const filteredTasks = currentTasks.filter(t => t.id !== taskId)
-      saveLocalTasks(filteredTasks)
-      
       // Remove from deleted tasks localStorage
       removeDeletedTask(taskId)
       
@@ -345,6 +345,14 @@ export default function Home() {
   const restoreTask = async (taskId: string) => {
     console.log("Attempting to restore task:", taskId)
     
+    // Check if task is already in localStorage to prevent duplicates
+    const currentLocalTasks = loadLocalTasks()
+    const currentLocalTaskIds = new Set(currentLocalTasks.map(task => task.id))
+    if (currentLocalTaskIds.has(taskId)) {
+      console.log("Task is already restored")
+      return
+    }
+    
     // Get deleted tasks from localStorage
     const deletedTasks = getDeletedTasks()
     const deletedItem = deletedTasks.find(item => item.task.id === taskId)
@@ -366,15 +374,76 @@ export default function Home() {
     // Remove from localStorage deleted tasks
     removeDeletedTask(taskId)
     
-    // Restore task to list (it's still in localStorage, so just add to frontend state)
-    const updatedTasks = [...tasks, deletedItem.task]
-    setTasks(updatedTasks)
-    // No need to save to localStorage since it was never removed
+    // Add task back to localStorage since it was removed during deletion
+    const updatedLocalTasks = [...currentLocalTasks, deletedItem.task]
+    saveLocalTasks(updatedLocalTasks)
+
+    // Restore task to list by reloading from localStorage to ensure consistency
+    const restoredLocalTasks = loadLocalTasks()
+    setTasks(restoredLocalTasks)
     
     // Show success toast
     toast({
       title: "Task restored",
       description: deletedItem.task.title,
+      duration: 3000
+    })
+  }
+
+  const restoreBulkTasks = async (taskIds: string[]) => {
+    console.log("Attempting to restore bulk tasks:", taskIds)
+    
+    // Get deleted tasks from localStorage
+    const deletedTasks = getDeletedTasks()
+    const deletedItems = deletedTasks.filter(item => taskIds.includes(item.task.id))
+    
+    if (deletedItems.length === 0) {
+      console.log("No tasks found in deleted tasks")
+      return
+    }
+    
+    console.log("Found deleted items:", deletedItems)
+    
+    // Clear timeouts from React state for all tasks
+    for (const taskId of taskIds) {
+      const queueItem = deletedTasksQueue.find(item => item.task.id === taskId)
+      if (queueItem) {
+        clearTimeout(queueItem.timeoutId)
+        setDeletedTasksQueue(prev => prev.filter(item => item.task.id !== taskId))
+      }
+    }
+    
+    // Remove from localStorage deleted tasks
+    for (const taskId of taskIds) {
+      removeDeletedTask(taskId)
+    }
+    
+    // Get current localStorage tasks to check for duplicates
+    const currentLocalTasks = loadLocalTasks()
+    const currentLocalTaskIds = new Set(currentLocalTasks.map(task => task.id))
+    
+    // Only restore tasks that are not already in localStorage
+    const restoredTasks = deletedItems
+      .map(item => item.task)
+      .filter(task => !currentLocalTaskIds.has(task.id))
+    
+    if (restoredTasks.length === 0) {
+      console.log("All tasks are already restored")
+      return
+    }
+    
+    // Add tasks back to localStorage since they were removed during deletion
+    const updatedLocalTasks = [...currentLocalTasks, ...restoredTasks]
+    saveLocalTasks(updatedLocalTasks)
+
+    // Restore tasks to list by reloading from localStorage to ensure consistency
+    const restoredLocalTasks = loadLocalTasks()
+    setTasks(restoredLocalTasks)
+    
+    // Show success toast
+    toast({
+      title: "Tasks restored",
+      description: `${restoredTasks.length} task${restoredTasks.length !== 1 ? 's' : ''} restored`,
       duration: 3000
     })
   }
@@ -406,21 +475,65 @@ export default function Home() {
   const confirmBulkDelete = async () => {
     const selectedTasks = tasks.filter(task => selectedTaskIds.includes(task.id))
     
-    // Delete each selected task
-    for (const task of selectedTasks) {
-      await deleteTask(task.id)
+    if (selectedTasks.length === 0) {
+      setShowDeleteConfirmation(false)
+      return
     }
+    
+    // Store selected task IDs for bulk restore
+    const deletedTaskIds = selectedTasks.map(task => task.id)
+    
+    // Remove all selected tasks from visible state immediately
+    const updatedTasks = tasks.filter(task => !selectedTaskIds.includes(task.id))
+    setTasks(updatedTasks)
+    
+    // Remove from localStorage immediately to persist deletion
+    const currentTasks = loadLocalTasks()
+    const filteredTasks = currentTasks.filter(task => !selectedTaskIds.includes(task.id))
+    saveLocalTasks(filteredTasks)
+    
+    // Add all tasks to deleted tasks localStorage
+    for (const task of selectedTasks) {
+      addDeletedTask(task)
+    }
+    
+    // Set timeouts for permanent deletion
+    const timeoutIds: NodeJS.Timeout[] = []
+    for (const task of selectedTasks) {
+      const timeoutId = setTimeout(() => {
+        // Remove from localStorage
+        const currentTasks = loadLocalTasks()
+        const filteredTasks = currentTasks.filter(t => t.id !== task.id)
+        saveLocalTasks(filteredTasks)
+        
+        // Remove from deleted tasks localStorage
+        removeDeletedTask(task.id)
+        
+        // Permanently delete from Convex if authenticated
+        if (session?.user && task._id) {
+          deleteTaskMutation({ taskId: task._id })
+        }
+      }, 60000)
+      timeoutIds.push(timeoutId)
+    }
+    
+    // Add to deleted queue for timeout management
+    setDeletedTasksQueue(prev => [
+      ...prev, 
+      ...selectedTasks.map((task, index) => ({ task, timeoutId: timeoutIds[index] }))
+    ])
     
     // Exit select mode
     setIsSelectMode(false)
     setSelectedTaskIds([])
     setShowDeleteConfirmation(false)
     
-    // Show success toast
+    // Show success toast with bulk restore action
     toast({
       title: "Tasks deleted",
       description: `${selectedTasks.length} task${selectedTasks.length !== 1 ? 's' : ''} deleted`,
-      duration: 3000
+      action: <ToastAction altText="Restore All" onClick={() => restoreBulkTasks(deletedTaskIds)}>Restore All</ToastAction>,
+      duration: 60000
     })
   }
 
