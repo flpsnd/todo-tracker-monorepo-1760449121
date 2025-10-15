@@ -3,13 +3,17 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useQuery, useMutation } from "convex/react"
 import { authClient } from "@/lib/auth-client"
-import { loadLocalNotes, saveLocalNotes, Note } from "@/lib/local-storage"
+import { loadLocalNotes, saveLocalNotes, Note, addDeletedNote, removeDeletedNote, getDeletedNotes } from "@/lib/local-storage"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { SignInDialog } from "@/components/sign-in-dialog"
 import { Button } from "@/components/ui/button"
 import { Trash2, ZoomIn, ZoomOut, RotateCcw } from "lucide-react"
 import { StickyNote } from "../components/sticky-note"
 import { NoteForm } from "../components/note-form"
+import { ErrorBoundary } from "../components/error-boundary"
+import { Toaster } from "@/components/ui/toaster"
+import { useToast } from "@/components/ui/use-toast"
+import { ToastAction } from "@/components/ui/toast"
 
 // Temporary API object until Convex generates types
 const api = {
@@ -46,12 +50,17 @@ export default function Home() {
   const [hasInitialized, setHasInitialized] = useState(false)
   const [selectedNotes, setSelectedNotes] = useState<string[]>([])
   const [isSelectMode, setIsSelectMode] = useState(false)
+  const [isReconnecting, setIsReconnecting] = useState(false)
+  const [deletedNotesQueue, setDeletedNotesQueue] = useState<Array<{note: Note, timeoutId: NodeJS.Timeout}>>([])
   
   const canvasRef = useRef<HTMLDivElement>(null)
   const lastPanRef = useRef({ x: 0, y: 0 })
 
   // Auth state
   const { data: session } = authClient.useSession()
+  
+  // Toast hook
+  const { toast } = useToast()
   
   // Convex queries and mutations (only available when Convex is configured)
   let convexNotes: any[] | undefined = undefined
@@ -69,6 +78,8 @@ export default function Home() {
   } catch (error) {
     // Convex not available during build or when not configured
     console.warn("Convex not available:", error)
+    // Ensure convexNotes is always an array to prevent crashes
+    convexNotes = []
   }
 
   // Initialize app with local-first logic
@@ -80,11 +91,23 @@ export default function Home() {
     setNotes(localNotes)
     setHasInitialized(true)
 
-    // If user is authenticated, sync with Convex
+    // If user is authenticated and Convex is available, sync with Convex
     if (session?.user && convexNotes !== undefined) {
       handleSyncWithConvex()
     }
   }, [session, convexNotes, hasInitialized])
+
+  // Handle Convex reconnection - sync when convexNotes becomes available again
+  useEffect(() => {
+    if (hasInitialized && session?.user) {
+      if (convexNotes === undefined) {
+        setIsReconnecting(true)
+      } else {
+        setIsReconnecting(false)
+        handleSyncWithConvex()
+      }
+    }
+  }, [convexNotes])
 
   // Handle sync with Convex when user signs in
   const handleSyncWithConvex = async () => {
@@ -92,27 +115,32 @@ export default function Home() {
 
     setSyncStatus("syncing")
     try {
+      // Ensure convexNotes is an array before accessing .length
+      const convexNotesArray = Array.isArray(convexNotes) ? convexNotes : []
+      
       // If we have local notes and no Convex notes, upload local notes
-      if (notes.length > 0 && convexNotes.length === 0) {
+      if (notes.length > 0 && convexNotesArray.length === 0) {
         await syncLocalNotesMutation({
           notes: notes.map((note: Note) => ({
             content: note.content,
             color: note.color,
             x: note.x,
             y: note.y,
+            rotation: note.rotation,
           }))
         })
       }
       
       // Update local state with Convex notes
-      if (convexNotes.length > 0) {
-        const convexNotesFormatted = convexNotes.map((note: any) => ({
+      if (convexNotesArray.length > 0) {
+        const convexNotesFormatted = convexNotesArray.map((note: any) => ({
           id: note._id, // Use Convex ID as the main ID
           _id: note._id, // Also store as _id for Convex operations
           content: note.content,
           color: note.color,
           x: note.x,
           y: note.y,
+          rotation: note.rotation || 0,
         }))
         setNotes(convexNotesFormatted)
         saveLocalNotes(convexNotesFormatted)
@@ -125,7 +153,7 @@ export default function Home() {
     }
   }
 
-  const addNote = async (note: Omit<Note, "id" | "x" | "y">) => {
+  const addNote = async (note: Omit<Note, "id" | "x" | "y" | "rotation">) => {
     // Position new note at the center of the current viewport in world coordinates
     const canvasRect = canvasRef.current?.getBoundingClientRect()
     if (!canvasRect) return
@@ -138,10 +166,12 @@ export default function Home() {
       id: crypto.randomUUID(),
       x: centerX,
       y: centerY,
+      rotation: 0,
     }
     
-    // Update local state immediately
-    const updatedNotes = [...notes, newNote]
+    // Update local state immediately - ensure notes is an array
+    const currentNotes = Array.isArray(notes) ? notes : []
+    const updatedNotes = [...currentNotes, newNote]
     setNotes(updatedNotes)
     saveLocalNotes(updatedNotes)
     
@@ -154,6 +184,7 @@ export default function Home() {
           color: newNote.color,
           x: newNote.x,
           y: newNote.y,
+          rotation: newNote.rotation,
         })
         setSyncStatus("synced")
       } catch (error) {
@@ -164,6 +195,8 @@ export default function Home() {
   }
 
   const updateNote = async (noteId: string, updates: Partial<Note>) => {
+    if (!Array.isArray(notes)) return
+    
     const updatedNotes = notes.map((note) => (note.id === noteId ? { ...note, ...updates } : note))
     setNotes(updatedNotes)
     saveLocalNotes(updatedNotes)
@@ -189,41 +222,217 @@ export default function Home() {
   }
 
   const deleteNote = async (noteId: string) => {
+    if (!Array.isArray(notes)) return
+    
     const noteToDelete = notes.find(n => n.id === noteId)
     if (!noteToDelete) return
     
-    // Remove from local state immediately
+    // Remove from visible notes immediately
     const updatedNotes = notes.filter(n => n.id !== noteId)
     setNotes(updatedNotes)
-    saveLocalNotes(updatedNotes)
     
-    // If authenticated, also delete from Convex
-    if (session?.user && noteToDelete._id && deleteNoteMutation) {
-      try {
-        setSyncStatus("syncing")
-        await deleteNoteMutation({ noteId: noteToDelete._id })
-        setSyncStatus("synced")
-      } catch (error) {
-        console.error("Failed to sync note deletion:", error)
-        setSyncStatus("error")
+    // Remove from localStorage immediately to persist deletion
+    const currentNotes = loadLocalNotes()
+    const filteredNotes = currentNotes.filter(n => n.id !== noteId)
+    saveLocalNotes(filteredNotes)
+    
+    // Add to localStorage deleted notes for restore functionality
+    addDeletedNote(noteToDelete)
+    
+    // Set 60s timeout for permanent deletion from deleted notes and Convex
+    const timeoutId = setTimeout(() => {
+      // Remove from deleted notes localStorage
+      removeDeletedNote(noteId)
+      
+      // Permanently delete from Convex if authenticated
+      if (session?.user && noteToDelete._id) {
+        deleteNoteMutation({ noteId: noteToDelete._id })
       }
+    }, 60000)
+    
+    // Add to deleted queue for timeout management
+    setDeletedNotesQueue(prev => [...prev, { note: noteToDelete, timeoutId }])
+    
+    // Show toast with restore action
+    toast({
+      title: "Note deleted",
+      description: noteToDelete.content.substring(0, 50) + (noteToDelete.content.length > 50 ? "..." : ""),
+      action: <ToastAction altText="Restore" onClick={() => restoreNote(noteId)}>Restore</ToastAction>,
+      duration: 60000
+    })
+  }
+
+  const restoreNote = async (noteId: string) => {
+    console.log("Attempting to restore note:", noteId)
+    
+    // Check if note is already in localStorage to prevent duplicates
+    const currentLocalNotes = loadLocalNotes()
+    const currentLocalNoteIds = new Set(currentLocalNotes.map(note => note.id))
+    if (currentLocalNoteIds.has(noteId)) {
+      console.log("Note is already restored")
+      return
     }
+    
+    // Get deleted notes from localStorage
+    const deletedNotes = getDeletedNotes()
+    const deletedItem = deletedNotes.find(item => item.note.id === noteId)
+    
+    if (!deletedItem) {
+      console.log("Note not found in deleted notes")
+      return
+    }
+    
+    console.log("Found deleted item:", deletedItem)
+    
+    // Clear timeout from React state
+    const queueItem = deletedNotesQueue.find(item => item.note.id === noteId)
+    if (queueItem) {
+      clearTimeout(queueItem.timeoutId)
+      setDeletedNotesQueue(prev => prev.filter(item => item.note.id !== noteId))
+    }
+    
+    // Remove from localStorage deleted notes
+    removeDeletedNote(noteId)
+    
+    // Add note back to localStorage since it was removed during deletion
+    const updatedLocalNotes = [...currentLocalNotes, deletedItem.note]
+    saveLocalNotes(updatedLocalNotes)
+
+    // Restore note to list by reloading from localStorage to ensure consistency
+    const restoredLocalNotes = loadLocalNotes()
+    setNotes(restoredLocalNotes)
+    
+    // Show success toast
+    toast({
+      title: "Note restored",
+      description: deletedItem.note.content.substring(0, 50) + (deletedItem.note.content.length > 50 ? "..." : ""),
+      duration: 3000
+    })
   }
 
   const deleteSelectedNotes = async () => {
+    if (!Array.isArray(notes)) return
+    
     const notesToDelete = notes.filter(note => selectedNotes.includes(note.id))
     
+    // Store selected note IDs for bulk restore
+    const deletedNoteIds = notesToDelete.map(note => note.id)
+    
+    // Remove all selected notes from visible state immediately
+    const updatedNotes = notes.filter(note => !selectedNotes.includes(note.id))
+    setNotes(updatedNotes)
+    
+    // Remove from localStorage immediately to persist deletion
+    const currentNotes = loadLocalNotes()
+    const filteredNotes = currentNotes.filter(note => !selectedNotes.includes(note.id))
+    saveLocalNotes(filteredNotes)
+    
+    // Add all notes to deleted notes localStorage
     for (const note of notesToDelete) {
-      await deleteNote(note.id)
+      addDeletedNote(note)
     }
     
+    // Set timeouts for permanent deletion
+    const timeoutIds: NodeJS.Timeout[] = []
+    for (const note of notesToDelete) {
+      const timeoutId = setTimeout(() => {
+        // Remove from localStorage
+        const currentNotes = loadLocalNotes()
+        const filteredNotes = currentNotes.filter(n => n.id !== note.id)
+        saveLocalNotes(filteredNotes)
+        
+        // Remove from deleted notes localStorage
+        removeDeletedNote(note.id)
+        
+        // Permanently delete from Convex if authenticated
+        if (session?.user && note._id) {
+          deleteNoteMutation({ noteId: note._id })
+        }
+      }, 60000)
+      timeoutIds.push(timeoutId)
+    }
+    
+    // Add to deleted queue for timeout management
+    setDeletedNotesQueue(prev => [
+      ...prev, 
+      ...notesToDelete.map((note, index) => ({ note, timeoutId: timeoutIds[index] }))
+    ])
+    
+    // Exit select mode
     setSelectedNotes([])
     setIsSelectMode(false)
+    
+    // Show success toast with bulk restore action
+    toast({
+      title: "Notes deleted",
+      description: `${notesToDelete.length} note${notesToDelete.length !== 1 ? 's' : ''} deleted`,
+      action: <ToastAction altText="Restore All" onClick={() => restoreBulkNotes(deletedNoteIds)}>Restore All</ToastAction>,
+      duration: 60000
+    })
+  }
+
+  const restoreBulkNotes = async (noteIds: string[]) => {
+    console.log("Attempting to restore bulk notes:", noteIds)
+    
+    // Get deleted notes from localStorage
+    const deletedNotes = getDeletedNotes()
+    const deletedItems = deletedNotes.filter(item => noteIds.includes(item.note.id))
+    
+    if (deletedItems.length === 0) {
+      console.log("No notes found in deleted notes")
+      return
+    }
+    
+    console.log("Found deleted items:", deletedItems)
+    
+    // Clear timeouts from React state for all notes
+    for (const noteId of noteIds) {
+      const queueItem = deletedNotesQueue.find(item => item.note.id === noteId)
+      if (queueItem) {
+        clearTimeout(queueItem.timeoutId)
+        setDeletedNotesQueue(prev => prev.filter(item => item.note.id !== noteId))
+      }
+    }
+    
+    // Remove from localStorage deleted notes
+    for (const noteId of noteIds) {
+      removeDeletedNote(noteId)
+    }
+    
+    // Get current localStorage notes to check for duplicates
+    const currentLocalNotes = loadLocalNotes()
+    const currentLocalNoteIds = new Set(currentLocalNotes.map(note => note.id))
+    
+    // Only restore notes that are not already in localStorage
+    const restoredNotes = deletedItems
+      .map(item => item.note)
+      .filter(note => !currentLocalNoteIds.has(note.id))
+    
+    if (restoredNotes.length === 0) {
+      console.log("All notes are already restored")
+      return
+    }
+    
+    // Add notes back to localStorage since they were removed during deletion
+    const updatedLocalNotes = [...currentLocalNotes, ...restoredNotes]
+    saveLocalNotes(updatedLocalNotes)
+
+    // Restore notes to list by reloading from localStorage to ensure consistency
+    const restoredLocalNotes = loadLocalNotes()
+    setNotes(restoredLocalNotes)
+    
+    // Show success toast
+    toast({
+      title: "Notes restored",
+      description: `${restoredNotes.length} note${restoredNotes.length !== 1 ? 's' : ''} restored`,
+      duration: 3000
+    })
   }
 
   // Canvas panning handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.target === canvasRef.current) {
+    // More permissive check - allow panning when clicking on canvas or empty areas
+    if (e.target === canvasRef.current || e.currentTarget === canvasRef.current) {
       setIsPanning(true)
       setDragStart({ x: e.clientX, y: e.clientY })
       lastPanRef.current = { x: viewportX, y: viewportY }
@@ -282,7 +491,8 @@ export default function Home() {
   }, [isPanning])
 
   return (
-    <main className="min-h-screen bg-background overflow-hidden relative">
+    <ErrorBoundary>
+      <main className="min-h-screen bg-background overflow-hidden relative">
       {/* Top bar */}
       <div className="absolute top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-sm border-b border-border p-4">
         <div className="mx-auto max-w-2xl">
@@ -319,10 +529,11 @@ export default function Home() {
           {session?.user && (
             <div className="mt-2 text-center">
               <span className="font-mono text-xs text-muted-foreground">
-                {syncStatus === "local-only" && "Local only"}
-                {syncStatus === "syncing" && "Syncing..."}
-                {syncStatus === "synced" && "Synced"}
-                {syncStatus === "error" && "Sync error"}
+                {isReconnecting && "Reconnecting..."}
+                {!isReconnecting && syncStatus === "local-only" && "Local only"}
+                {!isReconnecting && syncStatus === "syncing" && "Syncing..."}
+                {!isReconnecting && syncStatus === "synced" && "Synced"}
+                {!isReconnecting && syncStatus === "error" && "Sync error"}
               </span>
             </div>
           )}
@@ -351,28 +562,30 @@ export default function Home() {
             width: '100%',
             height: '100%',
             position: 'relative',
+            pointerEvents: 'none', // Allow clicks to pass through to canvas
           }}
         >
           {/* Notes */}
-          {notes.map((note) => (
-            <StickyNote
-              key={note.id}
-              note={note}
-              viewportX={viewportX}
-              viewportY={viewportY}
-              zoom={zoom}
-              onUpdate={(updates) => updateNote(note.id, updates)}
-              onDelete={() => deleteNote(note.id)}
-              isSelected={selectedNotes.includes(note.id)}
-              onSelect={(selected) => {
-                if (selected) {
-                  setSelectedNotes(prev => [...prev, note.id])
-                } else {
-                  setSelectedNotes(prev => prev.filter(id => id !== note.id))
-                }
-              }}
-              isSelectMode={isSelectMode}
-            />
+          {Array.isArray(notes) && notes.map((note) => (
+            <div key={note.id} style={{ pointerEvents: 'auto' }}>
+              <StickyNote
+                note={note}
+                viewportX={viewportX}
+                viewportY={viewportY}
+                zoom={zoom}
+                onUpdate={(updates) => updateNote(note.id, updates)}
+                onDelete={() => deleteNote(note.id)}
+                isSelected={selectedNotes.includes(note.id)}
+                onSelect={(selected) => {
+                  if (selected) {
+                    setSelectedNotes(prev => [...prev, note.id])
+                  } else {
+                    setSelectedNotes(prev => prev.filter(id => id !== note.id))
+                  }
+                }}
+                isSelectMode={isSelectMode}
+              />
+            </div>
           ))}
         </div>
       </div>
@@ -459,6 +672,10 @@ export default function Home() {
           colors={COLORS}
         />
       )}
-    </main>
+
+      {/* Toast Container */}
+      <Toaster />
+      </main>
+    </ErrorBoundary>
   )
 }

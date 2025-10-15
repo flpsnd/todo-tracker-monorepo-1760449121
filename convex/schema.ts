@@ -17,9 +17,10 @@ export default defineSchema({
   // Subscriptions table for tracker app
   subscriptions: defineTable({
     userId: v.id("user"),
+    month: v.string(),
     checkedSlots: v.array(v.number()),
     updatedAt: v.number(),
-  }).index("by_user", ["userId"]),
+  }).index("by_user", ["userId"]).index("by_user_and_month", ["userId", "month"]),
 
   // Notes table for ide-board app
   notes: defineTable({
@@ -27,6 +28,7 @@ export default defineSchema({
     color: v.string(),
     x: v.number(),
     y: v.number(),
+    rotation: v.number(),
     userId: v.id("user"),
     createdAt: v.number(),
     updatedAt: v.number(),

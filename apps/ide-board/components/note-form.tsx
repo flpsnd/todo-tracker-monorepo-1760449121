@@ -13,7 +13,7 @@ interface Color {
 }
 
 interface NoteFormProps {
-  onSubmit: (note: { content: string; color: string }) => void
+  onSubmit: (note: { content: string; color: string; rotation: number }) => void
   onClose: () => void
   colors: Color[]
 }
@@ -29,6 +29,7 @@ export function NoteForm({ onSubmit, onClose, colors }: NoteFormProps) {
     onSubmit({
       content: content.trim(),
       color: selectedColor,
+      rotation: 0,
     })
 
     setContent("")
@@ -87,13 +88,13 @@ export function NoteForm({ onSubmit, onClose, colors }: NoteFormProps) {
 
           <div className="space-y-2">
             <label className="font-mono text-sm font-medium">Color</label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-4 gap-2 max-w-[280px]">
               {colors.map((color) => (
                 <button
                   key={color.value}
                   type="button"
                   onClick={() => setSelectedColor(color.value)}
-                  className="h-8 w-8 rounded border-2 transition-all hover:scale-110"
+                  className="h-6 w-6 rounded border-2 transition-all hover:scale-110"
                   style={{
                     backgroundColor: color.value,
                     borderColor: selectedColor === color.value 

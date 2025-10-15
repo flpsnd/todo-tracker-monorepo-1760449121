@@ -17,7 +17,9 @@ import { Toaster } from "@/components/ui/toaster"
 import { useToast } from "@/components/ui/use-toast"
 import { ToastAction } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
-import { Trash2, X } from "lucide-react"
+import { Trash2, X, RefreshCw } from "lucide-react"
+import { ErrorBoundary } from "@/components/error-boundary"
+// import { useConvexQueryWithErrorHandling, useConvexMutationWithErrorHandling } from "@/lib/use-convex-query"
 
 // Temporary API object until Convex generates types
 const api = {
@@ -118,14 +120,14 @@ export default function Home() {
     setHasInitialized(true)
 
     // If user is authenticated, sync with Convex
-    if (session?.user && convexTasks) {
+    if (session?.user && convexTasks && Array.isArray(convexTasks)) {
       handleSyncWithConvex()
     }
   }, [session, convexTasks, hasInitialized])
 
   // Handle sync with Convex when user signs in
   const handleSyncWithConvex = async () => {
-    if (!session?.user || !convexTasks) return
+    if (!session?.user || !convexTasks || !Array.isArray(convexTasks)) return
 
     setSyncStatus("syncing")
     try {
@@ -161,6 +163,12 @@ export default function Home() {
     } catch (error) {
       console.error("Sync error:", error)
       setSyncStatus("error")
+      // Show error toast
+      toast({
+        title: "Sync Error",
+        description: "Failed to sync with server. Working in offline mode.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -192,6 +200,11 @@ export default function Home() {
       } catch (error) {
         console.error("Failed to sync task:", error)
         setSyncStatus("error")
+        toast({
+          title: "Sync Error",
+          description: "Failed to sync task. It's saved locally.",
+          variant: "destructive",
+        })
       }
     }
   }
@@ -224,6 +237,11 @@ export default function Home() {
       } catch (error) {
         console.error("Failed to sync task order:", error)
         setSyncStatus("error")
+        toast({
+          title: "Sync Error",
+          description: "Failed to sync task order. Changes saved locally.",
+          variant: "destructive",
+        })
       }
     }
   }
@@ -249,6 +267,11 @@ export default function Home() {
       } catch (error) {
         console.error("Failed to sync task move:", error)
         setSyncStatus("error")
+        toast({
+          title: "Sync Error",
+          description: "Failed to sync task move. Changes saved locally.",
+          variant: "destructive",
+        })
       }
     }
   }
@@ -274,6 +297,11 @@ export default function Home() {
       } catch (error) {
         console.error("Failed to sync task completion:", error)
         setSyncStatus("error")
+        toast({
+          title: "Sync Error",
+          description: "Failed to sync task completion. Changes saved locally.",
+          variant: "destructive",
+        })
       }
     }
   }
@@ -299,6 +327,11 @@ export default function Home() {
       } catch (error) {
         console.error("Failed to sync task update:", error)
         setSyncStatus("error")
+        toast({
+          title: "Sync Error",
+          description: "Failed to sync task update. Changes saved locally.",
+          variant: "destructive",
+        })
       }
     }
   }
@@ -545,37 +578,50 @@ export default function Home() {
   const sections = Array.from({ length: 30 }, (_, i) => getDayInfo(i))
 
   return (
-    <main className="min-h-screen bg-background p-8 pb-24" style={{ paddingBottom: '700px' }}>
-      <div className="mx-auto max-w-2xl space-y-3">
-        <div className="flex items-center justify-between">
-          <button 
-            onClick={() => setIsFormOpen(!isFormOpen)}
-            className="flex items-center gap-2 font-mono text-2xl font-semibold hover:opacity-80 transition-opacity"
-          >
-            <span>Add new task</span>
-            <ChevronDown className={`h-6 w-6 transition-transform duration-200 ${isFormOpen ? "rotate-180" : ""}`} />
-          </button>
-          <div className="flex items-center gap-2">
-            {session?.user ? (
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-sm text-muted-foreground">{session.user.email}</span>
-                <button
-                  onClick={() => authClient.signOut()}
-                  className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm"
-                >
-                  Sign out
-                </button>
-              </div>
-            ) : (
-              <SignInDialog>
-                <button className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm">
-                  Sign in
-                </button>
-              </SignInDialog>
-            )}
-            <ThemeToggle />
+    <ErrorBoundary
+      onError={(error) => {
+        console.error("App error:", error);
+        setSyncStatus("error");
+      }}
+    >
+      <main className="min-h-screen bg-background p-8 pb-24" style={{ paddingBottom: '700px' }}>
+        <div className="mx-auto max-w-2xl space-y-3">
+          <div className="flex items-center justify-between">
+            <button 
+              onClick={() => setIsFormOpen(!isFormOpen)}
+              className="flex items-center gap-2 font-mono text-2xl font-semibold hover:opacity-80 transition-opacity"
+            >
+              <span>Add new task</span>
+              <ChevronDown className={`h-6 w-6 transition-transform duration-200 ${isFormOpen ? "rotate-180" : ""}`} />
+            </button>
+            <div className="flex items-center gap-2">
+              {/* Sync Status Indicator */}
+              <div className={`w-2 h-2 rounded-full ${
+                syncStatus === "synced" ? "bg-green-500" :
+                syncStatus === "syncing" ? "bg-yellow-500" :
+                syncStatus === "error" ? "bg-red-500" :
+                "bg-gray-400"
+              }`} title={`Sync status: ${syncStatus}`} />
+              {session?.user ? (
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm text-muted-foreground">{session.user.email}</span>
+                  <button
+                    onClick={() => authClient.signOut()}
+                    className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              ) : (
+                <SignInDialog>
+                  <button className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm">
+                    Sign in
+                  </button>
+                </SignInDialog>
+              )}
+              <ThemeToggle />
+            </div>
           </div>
-        </div>
 
         <AnimatePresence>
           {isFormOpen && <TaskForm onSubmit={addTask} />}
@@ -701,5 +747,6 @@ export default function Home() {
       {/* Toast Container */}
       <Toaster />
     </main>
+    </ErrorBoundary>
   )
 }

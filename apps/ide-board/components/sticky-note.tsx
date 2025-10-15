@@ -33,9 +33,11 @@ export function StickyNote({
   const [isEditing, setIsEditing] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const [isRotating, setIsRotating] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [content, setContent] = useState(note.content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const noteRef = useRef<HTMLDivElement>(null)
 
   // Update content when note changes
   useEffect(() => {
@@ -58,7 +60,14 @@ export function StickyNote({
       return
     }
 
-    setIsDragging(true)
+    // Check if clicking on a corner handle
+    const target = e.target as HTMLElement
+    if (target.classList.contains('corner-handle')) {
+      setIsRotating(true)
+    } else {
+      setIsDragging(true)
+    }
+    
     setDragStart({
       x: e.clientX,
       y: e.clientY,
@@ -80,33 +89,63 @@ export function StickyNote({
         x: e.clientX,
         y: e.clientY,
       })
+    } else if (isRotating) {
+      // Calculate rotation based on mouse position relative to note center
+      if (noteRef.current) {
+        const rect = noteRef.current.getBoundingClientRect()
+        const centerX = rect.left + rect.width / 2
+        const centerY = rect.top + rect.height / 2
+        
+        const angle = Math.atan2(e.clientY - centerY, e.clientX - centerX)
+        const degrees = (angle * 180) / Math.PI
+        const newRotation = degrees
+        
+        onUpdate({ rotation: newRotation })
+      }
     }
   }
 
   const handleMouseUp = () => {
     setIsDragging(false)
+    setIsRotating(false)
   }
 
-  // Add global mouse event listeners for dragging
+  // Add global mouse event listeners for dragging and rotating
   useEffect(() => {
-    if (isDragging) {
+    if (isDragging || isRotating) {
       const handleGlobalMouseMove = (e: MouseEvent) => {
-        // Calculate delta in screen coordinates, then convert to world coordinates
-        const deltaX = (e.clientX - dragStart.x) / zoom
-        const deltaY = (e.clientY - dragStart.y) / zoom
-        const newX = note.x + deltaX
-        const newY = note.y + deltaY
-        onUpdate({ x: newX, y: newY })
-        
-        // Update drag start for next frame
-        setDragStart({
-          x: e.clientX,
-          y: e.clientY,
-        })
+        if (isDragging) {
+          // Calculate delta in screen coordinates, then convert to world coordinates
+          const deltaX = (e.clientX - dragStart.x) / zoom
+          const deltaY = (e.clientY - dragStart.y) / zoom
+          const newX = note.x + deltaX
+          const newY = note.y + deltaY
+          onUpdate({ x: newX, y: newY })
+          
+          // Update drag start for next frame
+          setDragStart({
+            x: e.clientX,
+            y: e.clientY,
+          })
+        } else if (isRotating) {
+          // Calculate rotation based on mouse position relative to note center
+          if (noteRef.current) {
+            const rect = noteRef.current.getBoundingClientRect()
+            const centerX = rect.left + rect.width / 2
+            const centerY = rect.top + rect.height / 2
+            
+            const angle = Math.atan2(e.clientY - centerY, e.clientX - centerX)
+            const degrees = (angle * 180) / Math.PI
+            const newRotation = degrees
+            
+            onUpdate({ rotation: newRotation })
+          }
+        }
       }
 
       const handleGlobalMouseUp = () => {
         setIsDragging(false)
+        setIsRotating(false)
       }
 
       document.addEventListener('mousemove', handleGlobalMouseMove)
@@ -117,7 +156,7 @@ export function StickyNote({
         document.removeEventListener('mouseup', handleGlobalMouseUp)
       }
     }
-  }, [isDragging, dragStart, note.x, note.y, zoom, onUpdate])
+  }, [isDragging, isRotating, dragStart, note.x, note.y, note.rotation, zoom, onUpdate])
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -165,7 +204,8 @@ export function StickyNote({
 
   return (
     <motion.div
-      className={`absolute min-w-[200px] max-w-[300px] p-3 rounded-lg border-2 shadow-lg cursor-move select-none ${
+      ref={noteRef}
+      className={`absolute min-w-[200px] max-w-[300px] min-h-[150px] p-3 rounded-lg border-2 shadow-lg cursor-move select-none ${
         isSelected ? 'ring-2 ring-blue-500' : ''
       }`}
       style={{
@@ -174,7 +214,9 @@ export function StickyNote({
         backgroundColor: note.color,
         color: note.color === '#000000' ? '#ffffff' : '#000000',
         borderColor: isSelected ? '#3b82f6' : 'rgba(0,0,0,0.1)',
-        zIndex: isDragging ? 1000 : 10,
+        zIndex: isDragging || isRotating ? 1000 : 10,
+        transform: `rotate(${note.rotation}deg)`,
+        transformOrigin: 'center',
       }}
       onMouseDown={handleMouseDown}
       onMouseLeave={(e) => {
@@ -217,6 +259,16 @@ export function StickyNote({
         >
           <Trash2 className="h-3 w-3" />
         </Button>
+      )}
+
+      {/* Corner handles for rotation (appears on hover) */}
+      {isHovered && !isSelectMode && (
+        <>
+          <div className="corner-handle absolute -top-1 -left-1 w-3 h-3 bg-blue-500 rounded-full cursor-grab hover:bg-blue-600 transition-colors" />
+          <div className="corner-handle absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full cursor-grab hover:bg-blue-600 transition-colors" />
+          <div className="corner-handle absolute -bottom-1 -left-1 w-3 h-3 bg-blue-500 rounded-full cursor-grab hover:bg-blue-600 transition-colors" />
+          <div className="corner-handle absolute -bottom-1 -right-1 w-3 h-3 bg-blue-500 rounded-full cursor-grab hover:bg-blue-600 transition-colors" />
+        </>
       )}
 
       {/* Content */}

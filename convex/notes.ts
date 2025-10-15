@@ -11,6 +11,7 @@ export const getNotes = query({
     color: v.string(),
     x: v.number(),
     y: v.number(),
+    rotation: v.number(),
     userId: v.id("user"),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -32,6 +33,7 @@ export const addNote = mutation({
     color: v.string(),
     x: v.number(),
     y: v.number(),
+    rotation: v.number(),
   },
   returns: v.id("notes"),
   handler: async (ctx, args) => {
@@ -55,6 +57,7 @@ export const updateNote = mutation({
     color: v.optional(v.string()),
     x: v.optional(v.number()),
     y: v.optional(v.number()),
+    rotation: v.optional(v.number()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -93,6 +96,7 @@ export const syncLocalNotes = mutation({
       color: v.string(),
       x: v.number(),
       y: v.number(),
+      rotation: v.number(),
     })),
   },
   returns: v.array(v.id("notes")),

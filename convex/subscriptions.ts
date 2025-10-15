@@ -3,14 +3,16 @@ import { v } from "convex/values";
 import { authComponent } from "./auth";
 
 export const getSubscriptions = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    month: v.string(),
+  },
+  handler: async (ctx, args) => {
     const user = await authComponent.getAuthUser(ctx);
     if (!user) return null;
 
     const subscription = await ctx.db
       .query("subscriptions")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .withIndex("by_user_and_month", (q) => q.eq("userId", user._id).eq("month", args.month))
       .first();
 
     return subscription;
@@ -19,6 +21,7 @@ export const getSubscriptions = query({
 
 export const syncLocalSubscriptions = mutation({
   args: {
+    month: v.string(),
     checkedSlots: v.array(v.number()),
   },
   handler: async (ctx, args) => {
@@ -27,10 +30,10 @@ export const syncLocalSubscriptions = mutation({
 
     const now = Date.now();
     
-    // Check if user already has subscription data
+    // Check if user already has subscription data for this month
     const existingSubscription = await ctx.db
       .query("subscriptions")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .withIndex("by_user_and_month", (q) => q.eq("userId", user._id).eq("month", args.month))
       .first();
 
     if (existingSubscription) {
@@ -43,6 +46,7 @@ export const syncLocalSubscriptions = mutation({
       // Create new subscription
       return await ctx.db.insert("subscriptions", {
         userId: user._id,
+        month: args.month,
         checkedSlots: args.checkedSlots,
         updatedAt: now,
       });
@@ -52,6 +56,7 @@ export const syncLocalSubscriptions = mutation({
 
 export const updateSubscription = mutation({
   args: {
+    month: v.string(),
     slotIndex: v.number(),
     isChecked: v.boolean(),
   },
@@ -61,7 +66,7 @@ export const updateSubscription = mutation({
 
     const subscription = await ctx.db
       .query("subscriptions")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .withIndex("by_user_and_month", (q) => q.eq("userId", user._id).eq("month", args.month))
       .first();
 
     if (!subscription) {
@@ -69,6 +74,7 @@ export const updateSubscription = mutation({
       const now = Date.now();
       return await ctx.db.insert("subscriptions", {
         userId: user._id,
+        month: args.month,
         checkedSlots: args.isChecked ? [args.slotIndex] : [],
         updatedAt: now,
       });
@@ -94,6 +100,7 @@ export const updateSubscription = mutation({
 
 export const batchUpdateSubscriptions = mutation({
   args: {
+    month: v.string(),
     checkedSlots: v.array(v.number()),
   },
   handler: async (ctx, args) => {
@@ -102,7 +109,7 @@ export const batchUpdateSubscriptions = mutation({
 
     const subscription = await ctx.db
       .query("subscriptions")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .withIndex("by_user_and_month", (q) => q.eq("userId", user._id).eq("month", args.month))
       .first();
 
     const now = Date.now();
@@ -111,6 +118,7 @@ export const batchUpdateSubscriptions = mutation({
       // Create new subscription
       return await ctx.db.insert("subscriptions", {
         userId: user._id,
+        month: args.month,
         checkedSlots: args.checkedSlots,
         updatedAt: now,
       });

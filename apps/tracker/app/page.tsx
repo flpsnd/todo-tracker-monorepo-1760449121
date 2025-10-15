@@ -7,10 +7,43 @@ import { authClient } from "@/lib/auth-client"
 import { loadLocalSubscriptions, saveLocalSubscriptions } from "@/lib/local-storage"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-import { TrendingUp, Users, Euro } from "lucide-react"
+import { TrendingUp, Users, Euro, ChevronLeft, ChevronRight } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { AuthButton } from "@/components/auth-button"
+import { SignInDialog } from "@/components/sign-in-dialog"
 import { SyncStatus } from "@/components/sync-status"
+import { Button } from "@/components/ui/button"
+
+// Helper function to get current month in YYYY-MM format
+function getCurrentMonthString(): string {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = (now.getMonth() + 1).toString().padStart(2, '0')
+  return `${year}-${month}`
+}
+
+// Helper function to format month for display
+function formatMonthDisplay(monthString: string): string {
+  const [year, month] = monthString.split('-')
+  const date = new Date(parseInt(year), parseInt(month) - 1)
+  return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+}
+
+// Helper function to navigate months
+function getPreviousMonth(monthString: string): string {
+  const [year, month] = monthString.split('-')
+  const date = new Date(parseInt(year), parseInt(month) - 2)
+  const newYear = date.getFullYear()
+  const newMonth = (date.getMonth() + 1).toString().padStart(2, '0')
+  return `${newYear}-${newMonth}`
+}
+
+function getNextMonth(monthString: string): string {
+  const [year, month] = monthString.split('-')
+  const date = new Date(parseInt(year), parseInt(month))
+  const newYear = date.getFullYear()
+  const newMonth = (date.getMonth() + 1).toString().padStart(2, '0')
+  return `${newYear}-${newMonth}`
+}
 
 export default function SubscriptionTracker() {
   const TOTAL_SLOTS = 1000
@@ -21,20 +54,21 @@ export default function SubscriptionTracker() {
   const { data: session, isPending: sessionLoading } = authClient.useSession()
   const [syncStatus, setSyncStatus] = useState<"local-only" | "syncing" | "synced" | "error">("local-only")
   const [hasInitialized, setHasInitialized] = useState(false)
+  const [currentMonth, setCurrentMonth] = useState<string>(() => getCurrentMonthString())
 
   // Initialize from localStorage or default to empty array
   const [checkedBoxes, setCheckedBoxes] = useState<Set<number>>(() => {
     if (typeof window !== "undefined") {
-      return loadLocalSubscriptions()
+      return loadLocalSubscriptions(currentMonth)
     }
     return new Set()
   })
 
   // Convex queries and mutations
-  const subscriptionData = useQuery(api.subscriptions.getSubscriptions)
-  const syncLocalSubscriptions = useMutation(api.subscriptions.syncLocalSubscriptions)
-  const updateSubscription = useMutation(api.subscriptions.updateSubscription)
-  const batchUpdateSubscriptions = useMutation(api.subscriptions.batchUpdateSubscriptions)
+  const subscriptionData = useQuery(api.subscriptions.getSubscriptions as any, { month: currentMonth })
+  const syncLocalSubscriptions = useMutation(api.subscriptions.syncLocalSubscriptions as any)
+  const updateSubscription = useMutation(api.subscriptions.updateSubscription as any)
+  const batchUpdateSubscriptions = useMutation(api.subscriptions.batchUpdateSubscriptions as any)
 
   // Initialize sync when user logs in
   useEffect(() => {
@@ -44,7 +78,7 @@ export default function SubscriptionTracker() {
       
       // Sync local data to Convex
       const localData = Array.from(checkedBoxes)
-      syncLocalSubscriptions({ checkedSlots: localData })
+      syncLocalSubscriptions({ month: currentMonth, checkedSlots: localData })
         .then(() => {
           setSyncStatus("synced")
         })
@@ -56,24 +90,30 @@ export default function SubscriptionTracker() {
       setHasInitialized(false)
       setSyncStatus("local-only")
     }
-  }, [session?.user, hasInitialized, checkedBoxes, syncLocalSubscriptions])
+  }, [session?.user, hasInitialized, checkedBoxes, syncLocalSubscriptions, currentMonth])
 
   // Update local state when Convex data changes
   useEffect(() => {
     if (subscriptionData && session?.user) {
       const convexData = new Set<number>(subscriptionData.checkedSlots)
       setCheckedBoxes(convexData)
-      saveLocalSubscriptions(convexData)
+      saveLocalSubscriptions(currentMonth, convexData)
       setSyncStatus("synced")
     }
-  }, [subscriptionData, session?.user])
+  }, [subscriptionData, session?.user, currentMonth])
 
   // Save to localStorage whenever checkedBoxes changes (for offline mode)
   useEffect(() => {
     if (!session?.user) {
-      saveLocalSubscriptions(checkedBoxes)
+      saveLocalSubscriptions(currentMonth, checkedBoxes)
     }
-  }, [checkedBoxes, session?.user])
+  }, [checkedBoxes, session?.user, currentMonth])
+
+  // Load data when month changes
+  useEffect(() => {
+    const monthData = loadLocalSubscriptions(currentMonth)
+    setCheckedBoxes(monthData)
+  }, [currentMonth])
 
   const toggleCheckbox = async (index: number) => {
     const newSet = new Set(checkedBoxes)
@@ -92,6 +132,7 @@ export default function SubscriptionTracker() {
       try {
         setSyncStatus("syncing")
         await updateSubscription({ 
+          month: currentMonth,
           slotIndex: index, 
           isChecked: !isChecked 
         })
@@ -103,6 +144,17 @@ export default function SubscriptionTracker() {
         setCheckedBoxes(checkedBoxes)
       }
     }
+  }
+
+  // Month navigation functions
+  const goToPreviousMonth = () => {
+    const previousMonth = getPreviousMonth(currentMonth)
+    setCurrentMonth(previousMonth)
+  }
+
+  const goToNextMonth = () => {
+    const nextMonth = getNextMonth(currentMonth)
+    setCurrentMonth(nextMonth)
   }
 
   const activeCount = checkedBoxes.size
@@ -121,15 +173,32 @@ export default function SubscriptionTracker() {
   ]
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-8">
+    <div className="min-h-screen bg-background p-4 md:p-8 pb-24">
       <div className="mx-auto max-w-2xl space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight text-balance font-mono">Subscription Tracker</h1>
+            <p className="text-sm text-muted-foreground font-mono">{formatMonthDisplay(currentMonth)}</p>
           </div>
           <div className="flex items-center gap-2">
-            <AuthButton />
+            {session?.user ? (
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm text-muted-foreground">{session.user.email}</span>
+                <button
+                  onClick={() => authClient.signOut()}
+                  className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm"
+                >
+                  Sign out
+                </button>
+              </div>
+            ) : (
+              <SignInDialog>
+                <button className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm">
+                  Sign in
+                </button>
+              </SignInDialog>
+            )}
             <ThemeToggle />
           </div>
         </div>
@@ -274,6 +343,32 @@ export default function SubscriptionTracker() {
             </p>
           </div>
         </Card>
+
+        {/* Sticky Bottom Navigation */}
+        <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-40">
+          <div className="mx-auto max-w-2xl">
+            <div className="flex items-center justify-between gap-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={goToPreviousMonth}
+                className="font-mono"
+              >
+                <ChevronLeft className="h-4 w-4 mr-2" />
+                Previous month
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={goToNextMonth}
+                className="font-mono"
+              >
+                Next month
+                <ChevronRight className="h-4 w-4 ml-2" />
+              </Button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )

@@ -1,14 +1,17 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Plus, Eye, EyeOff, Trash2, X, ChevronLeft } from "lucide-react"
 import { AnimatePresence } from "framer-motion"
 import { authClient } from "@/lib/auth-client"
-import { loadLocalNotes, saveLocalNotes, type Note } from "@/lib/local-storage"
+import { loadLocalNotes, saveLocalNotes, addDeletedNote, removeDeletedNote, getDeletedNotes, type Note } from "@/lib/local-storage"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { Toaster } from "@/components/ui/toaster"
+import { useToast } from "@/components/ui/use-toast"
+import { ToastAction } from "@/components/ui/toast"
 
 export default function Home() {
   const [notes, setNotes] = useState<Note[]>([])
@@ -16,9 +19,14 @@ export default function Home() {
   const [showHistory, setShowHistory] = useState(false)
   const [formData, setFormData] = useState({ title: "", content: "" })
   const [hasInitialized, setHasInitialized] = useState(false)
+  const [deletedNotesQueue, setDeletedNotesQueue] = useState<Array<{note: Note, timeoutId: NodeJS.Timeout}>>([])
+  const contentRef = useRef<HTMLDivElement>(null)
 
   // Auth state
   const { data: session } = authClient.useSession()
+  
+  // Toast hook
+  const { toast } = useToast()
 
   // Initialize app with local-first logic
   useEffect(() => {
@@ -84,26 +92,114 @@ export default function Home() {
     setCurrentNote(null)
     setFormData({ title: "", content: "" })
     setShowHistory(false)
+    
+    // Clear contentEditable div
+    if (contentRef.current) {
+      contentRef.current.innerHTML = ""
+    }
   }
 
   const openNote = (note: Note) => {
     setCurrentNote(note)
     setFormData({ title: note.title, content: note.content })
     setShowHistory(false)
+    
+    // Set content in contentEditable div
+    if (contentRef.current) {
+      contentRef.current.innerHTML = note.content
+    }
   }
 
   const deleteNote = (noteId: string) => {
+    const noteToDelete = notes.find(n => n.id === noteId)
+    if (!noteToDelete) return
+    
+    // Remove from visible notes immediately
     const updatedNotes = notes.filter(note => note.id !== noteId)
     setNotes(updatedNotes)
-    saveLocalNotes(updatedNotes)
+    
+    // Remove from localStorage immediately to persist deletion
+    const currentNotes = loadLocalNotes()
+    const filteredNotes = currentNotes.filter(n => n.id !== noteId)
+    saveLocalNotes(filteredNotes)
+    
+    // Add to localStorage deleted notes for restore functionality
+    addDeletedNote(noteToDelete)
+    
+    // Set 60s timeout for permanent deletion from deleted notes
+    const timeoutId = setTimeout(() => {
+      // Remove from deleted notes localStorage
+      removeDeletedNote(noteId)
+    }, 60000)
+    
+    // Add to deleted queue for timeout management
+    setDeletedNotesQueue(prev => [...prev, { note: noteToDelete, timeoutId }])
+    
+    // Show toast with restore action
+    toast({
+      title: "Note deleted",
+      description: noteToDelete.title,
+      action: <ToastAction altText="Restore" onClick={() => restoreNote(noteId)}>Restore</ToastAction>,
+      duration: 60000
+    })
     
     // If we're viewing the deleted note, create a new one
     if (currentNote?.id === noteId) {
       setCurrentNote(null)
       setFormData({ title: "", content: "" })
+      if (contentRef.current) {
+        contentRef.current.innerHTML = ""
+      }
     }
   }
 
+  const restoreNote = (noteId: string) => {
+    console.log("Attempting to restore note:", noteId)
+    
+    // Check if note is already in localStorage to prevent duplicates
+    const currentLocalNotes = loadLocalNotes()
+    const currentLocalNoteIds = new Set(currentLocalNotes.map(note => note.id))
+    if (currentLocalNoteIds.has(noteId)) {
+      console.log("Note is already restored")
+      return
+    }
+    
+    // Get deleted notes from localStorage
+    const deletedNotes = getDeletedNotes()
+    const deletedItem = deletedNotes.find(item => item.note.id === noteId)
+    
+    if (!deletedItem) {
+      console.log("Note not found in deleted notes")
+      return
+    }
+    
+    console.log("Found deleted item:", deletedItem)
+    
+    // Clear timeout from React state
+    const queueItem = deletedNotesQueue.find(item => item.note.id === noteId)
+    if (queueItem) {
+      clearTimeout(queueItem.timeoutId)
+      setDeletedNotesQueue(prev => prev.filter(item => item.note.id !== noteId))
+    }
+    
+    // Remove from localStorage deleted notes
+    removeDeletedNote(noteId)
+    
+    // Add note back to localStorage since it was removed during deletion
+    const updatedLocalNotes = [...currentLocalNotes, deletedItem.note]
+    saveLocalNotes(updatedLocalNotes)
+
+    // Restore note to list by reloading from localStorage to ensure consistency
+    const restoredLocalNotes = loadLocalNotes()
+    setNotes(restoredLocalNotes)
+    
+    // Show success toast
+    toast({
+      title: "Note restored",
+      description: deletedItem.note.title,
+      duration: 3000
+    })
+  }
 
   const formatDate = (timestamp: number) => {
     return new Date(timestamp).toLocaleDateString("en-US", {
@@ -116,8 +212,10 @@ export default function Home() {
   }
 
   const truncateContent = (content: string, maxLength: number = 150) => {
-    if (content.length <= maxLength) return content
-    return content.substring(0, maxLength) + "..."
+    // Strip HTML tags for preview
+    const textContent = content.replace(/<[^>]*>/g, '')
+    if (textContent.length <= maxLength) return textContent
+    return textContent.substring(0, maxLength) + "..."
   }
 
   return (
@@ -131,6 +229,12 @@ export default function Home() {
               <Input
                 value={formData.title}
                 onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    contentRef.current?.focus()
+                  }
+                }}
                 className="font-mono text-2xl font-bold tracking-tight text-balance border-none bg-transparent px-0 focus-visible:ring-0 placeholder:text-muted-foreground"
                 placeholder="Add title"
               />
@@ -142,11 +246,50 @@ export default function Home() {
           </div>
           
           {/* Content textarea */}
-          <Textarea
-            value={formData.content}
-            onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
+          <div
+            ref={contentRef}
+            contentEditable
+            onInput={(e) => {
+              const content = e.currentTarget.innerHTML
+              setFormData(prev => ({ ...prev, content }))
+            }}
+            onKeyDown={(e) => {
+              // Handle formatting shortcuts
+              if (e.metaKey || e.ctrlKey) {
+                switch (e.key) {
+                  case 'b':
+                    e.preventDefault()
+                    document.execCommand('bold')
+                    break
+                  case 'i':
+                    e.preventDefault()
+                    document.execCommand('italic')
+                    break
+                  case 'u':
+                    e.preventDefault()
+                    document.execCommand('underline')
+                    break
+                }
+              }
+              
+              // Handle list shortcuts
+              if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+                switch (e.key) {
+                  case '8':
+                    e.preventDefault()
+                    document.execCommand('insertUnorderedList')
+                    break
+                  case '7':
+                    e.preventDefault()
+                    document.execCommand('insertOrderedList')
+                    break
+                }
+              }
+            }}
             className="min-h-[calc(100vh-300px)] font-mono text-base leading-relaxed border-none bg-transparent resize-none focus-visible:ring-0 p-0 placeholder:text-muted-foreground"
-            placeholder="Start writing your note..."
+            style={{ outline: 'none' }}
+            data-placeholder="Start writing your note..."
+            suppressContentEditableWarning={true}
           />
         </div>
       </div>
@@ -170,7 +313,7 @@ export default function Home() {
                   notes.map((note) => (
                     <div
                       key={note.id}
-                      className="note-item hover:bg-accent/30 transition-colors cursor-pointer group"
+                      className="note-item cursor-pointer group pb-5 border-b border-border"
                       onClick={() => openNote(note)}
                     >
                       <div className="space-y-2">
@@ -279,6 +422,9 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* Toast Container */}
+      <Toaster />
     </main>
   )
 }

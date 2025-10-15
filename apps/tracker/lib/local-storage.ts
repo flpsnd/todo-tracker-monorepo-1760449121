@@ -1,20 +1,36 @@
 const STORAGE_KEY = "subscription-tracker";
 
-export function loadLocalSubscriptions(): Set<number> {
+export function loadLocalSubscriptions(month: string): Set<number> {
   if (typeof window === "undefined") return new Set();
   try {
     const data = localStorage.getItem(STORAGE_KEY);
-    return data ? new Set(JSON.parse(data)) : new Set();
+    if (!data) return new Set();
+    
+    const parsed = JSON.parse(data);
+    const monthData = parsed[month] || [];
+    return new Set(monthData);
   } catch (error) {
     console.error("Failed to load local subscriptions:", error);
     return new Set();
   }
 }
 
-export function saveLocalSubscriptions(checkedSlots: Set<number>): void {
+export function saveLocalSubscriptions(month: string, checkedSlots: Set<number>): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(checkedSlots)));
+    const data = localStorage.getItem(STORAGE_KEY);
+    let parsed = {};
+    
+    if (data) {
+      try {
+        parsed = JSON.parse(data);
+      } catch (e) {
+        parsed = {};
+      }
+    }
+    
+    parsed[month] = Array.from(checkedSlots);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
   } catch (error) {
     console.error("Failed to save local subscriptions:", error);
   }
