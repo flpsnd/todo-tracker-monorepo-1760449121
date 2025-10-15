@@ -166,4 +166,22 @@
     content: attr(data-placeholder);
     color: hsl(var(--muted-foreground));
   }
+  
+  /* List styling for contentEditable */
+  [contenteditable] ul {
+    margin: 1em 0;
+    padding-left: 2em;
+    list-style-type: disc;
+  }
+
+  [contenteditable] ol {
+    margin: 1em 0;
+    padding-left: 2em;
+    list-style-type: decimal;
+  }
+
+  [contenteditable] li {
+    margin: 0.5em 0;
+    display: list-item;
+  }
 }

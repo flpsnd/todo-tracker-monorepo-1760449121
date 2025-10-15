@@ -13,6 +13,60 @@ import { Toaster } from "@/components/ui/toaster"
 import { useToast } from "@/components/ui/use-toast"
 import { ToastAction } from "@/components/ui/toast"
 
+// Helper functions for list creation
+const createUnorderedList = (divElement: HTMLElement) => {
+  // Clear the trigger characters from the div first
+  divElement.textContent = ''
+  
+  const ul = document.createElement('ul')
+  const li = document.createElement('li')
+  li.textContent = ''
+  ul.appendChild(li)
+  
+  // Replace the div with the ul
+  divElement.parentNode?.replaceChild(ul, divElement)
+  
+  // Set cursor in the new list item
+  const range = document.createRange()
+  const selection = window.getSelection()
+  range.setStart(li, 0)
+  range.setEnd(li, 0)
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+  
+  // Focus the contentEditable to ensure cursor is visible
+  if (ul.parentElement) {
+    (ul.parentElement as HTMLElement).focus()
+  }
+}
+
+const createOrderedList = (divElement: HTMLElement, startNumber: number) => {
+  // Clear the trigger characters from the div first
+  divElement.textContent = ''
+  
+  const ol = document.createElement('ol')
+  ol.setAttribute('start', startNumber.toString())
+  const li = document.createElement('li')
+  li.textContent = ''
+  ol.appendChild(li)
+  
+  // Replace the div with the ol
+  divElement.parentNode?.replaceChild(ol, divElement)
+  
+  // Set cursor in the new list item
+  const range = document.createRange()
+  const selection = window.getSelection()
+  range.setStart(li, 0)
+  range.setEnd(li, 0)
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+  
+  // Focus the contentEditable to ensure cursor is visible
+  if (ol.parentElement) {
+    (ol.parentElement as HTMLElement).focus()
+  }
+}
+
 export default function Home() {
   const [notes, setNotes] = useState<Note[]>([])
   const [currentNote, setCurrentNote] = useState<Note | null>(null)
@@ -238,9 +292,6 @@ export default function Home() {
                 className="font-mono text-2xl font-bold tracking-tight text-balance border-none bg-transparent px-0 focus-visible:ring-0 placeholder:text-muted-foreground"
                 placeholder="Add title"
               />
-              {!formData.title && (
-                <div className="absolute bottom-0 left-0 w-[100px] h-px bg-border"></div>
-              )}
             </div>
             <ThemeToggle />
           </div>
@@ -285,6 +336,85 @@ export default function Home() {
                     break
                 }
               }
+
+              // Handle automatic list creation on space key
+              if (e.key === ' ') {
+                const selection = window.getSelection()
+                if (!selection || selection.rangeCount === 0) return
+                
+                const range = selection.getRangeAt(0)
+                let node = range.startContainer
+                
+                // Get the current div element
+                let divElement: HTMLElement | null = null
+                if (node.nodeType === Node.TEXT_NODE) {
+                  divElement = node.parentElement as HTMLElement
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                  divElement = node as HTMLElement
+                }
+                
+                // Check if we're in a div at the root level (not inside a list)
+                if (divElement?.tagName === 'DIV' && 
+                    divElement.parentElement === contentRef.current) {
+                  
+                  const text = divElement.textContent || ''
+                  
+                  // Check for bullet patterns: "*" or "-" at start of line
+                  if (text === '*' || text === '-') {
+                    e.preventDefault()
+                    createUnorderedList(divElement)
+                    return
+                  }
+                  
+                  // Check for numbered pattern: "number." at start of line
+                  const numberedMatch = text.match(/^(\d+)\.$/)
+                  if (numberedMatch) {
+                    e.preventDefault()
+                    const startNumber = parseInt(numberedMatch[1])
+                    createOrderedList(divElement, startNumber)
+                    return
+                  }
+                }
+              }
+
+
+
+              // Handle Enter key for list continuation and exit
+              if (e.key === 'Enter') {
+                const selection = window.getSelection()
+                if (!selection || selection.rangeCount === 0) return
+                
+                const range = selection.getRangeAt(0)
+                let listItem: Node | null = range.commonAncestorContainer
+                
+                // Find the LI element
+                while (listItem && listItem.nodeName !== 'LI') {
+                  listItem = listItem.parentElement
+                }
+                
+                // If in an empty list item, exit the list
+                if (listItem && listItem.textContent?.trim() === '') {
+                  e.preventDefault()
+                  document.execCommand('outdent')
+                  document.execCommand('formatBlock', false, 'div')
+                }
+                // If not in a list, let the default behavior create a new div
+              }
+
+              // Handle Escape key to exit lists
+              if (e.key === 'Escape') {
+                const selection = window.getSelection()
+                if (selection && selection.rangeCount > 0) {
+                  const range = selection.getRangeAt(0)
+                  const isInList = range.commonAncestorContainer.parentElement?.tagName === 'LI'
+                  
+                  if (isInList) {
+                    e.preventDefault()
+                    // Exit the list by inserting a paragraph
+                    document.execCommand('insertParagraph')
+                  }
+                }
+              }
             }}
             className="min-h-[calc(100vh-300px)] font-mono text-base leading-relaxed border-none bg-transparent resize-none focus-visible:ring-0 p-0 placeholder:text-muted-foreground"
             style={{ outline: 'none' }}
@@ -297,7 +427,7 @@ export default function Home() {
       {/* History panel */}
       <AnimatePresence>
         {showHistory && (
-          <div className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50">
+          <div className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50 overflow-y-auto">
             <div className="max-w-2xl mx-auto py-8 pb-20">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold tracking-tight text-balance font-mono">Saved Notes</h2>
@@ -337,7 +467,7 @@ export default function Home() {
                         </div>
                         
                         <div className="font-mono text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap line-clamp-3">
-                          {note.content}
+                          {truncateContent(note.content)}
                         </div>
                         
                         <div className="mt-4 text-xs text-muted-foreground font-mono">
@@ -350,42 +480,13 @@ export default function Home() {
               </div>
             </div>
             
-            {/* Sticky Bottom UI for History */}
-            <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-40">
-              <div className="mx-auto max-w-2xl">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => setShowHistory(false)}
-                      className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2"
-                      aria-label="Back to writing"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                      <span className="font-mono text-sm">
-                        {currentNote?.title || "Back"}
-                      </span>
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={createNewNote}
-                      className="font-mono"
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      New note
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         )}
       </AnimatePresence>
 
 
       {/* Sticky Bottom UI */}
-      <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-40">
+      <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-50">
         <div className="mx-auto max-w-2xl">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">

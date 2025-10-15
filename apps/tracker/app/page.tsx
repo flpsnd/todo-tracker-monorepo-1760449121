@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { useQuery, useMutation } from "convex/react"
 import { api } from "../convex/_generated/api"
 import { authClient } from "@/lib/auth-client"
-import { loadLocalSubscriptions, saveLocalSubscriptions } from "@/lib/local-storage"
+import { loadLocalSubscriptions, saveLocalSubscriptions, debugLocalStorage, clearLocalSubscriptions } from "@/lib/local-storage"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { TrendingUp, Users, Euro, ChevronLeft, ChevronRight } from "lucide-react"
@@ -102,16 +102,12 @@ export default function SubscriptionTracker() {
     }
   }, [subscriptionData, session?.user, currentMonth])
 
-  // Save to localStorage whenever checkedBoxes changes (for offline mode)
-  useEffect(() => {
-    if (!session?.user) {
-      saveLocalSubscriptions(currentMonth, checkedBoxes)
-    }
-  }, [checkedBoxes, session?.user, currentMonth])
 
   // Load data when month changes
   useEffect(() => {
+    console.log(`Loading data for month: ${currentMonth}`)
     const monthData = loadLocalSubscriptions(currentMonth)
+    console.log(`Loaded data for ${currentMonth}:`, Array.from(monthData))
     setCheckedBoxes(monthData)
   }, [currentMonth])
 
@@ -126,6 +122,9 @@ export default function SubscriptionTracker() {
     }
     
     setCheckedBoxes(newSet)
+    
+    // Always save to localStorage immediately
+    saveLocalSubscriptions(currentMonth, newSet)
 
     // If user is logged in, sync to Convex
     if (session?.user) {
@@ -142,18 +141,40 @@ export default function SubscriptionTracker() {
         setSyncStatus("error")
         // Revert the change on error
         setCheckedBoxes(checkedBoxes)
+        // Also revert localStorage
+        saveLocalSubscriptions(currentMonth, checkedBoxes)
       }
     }
   }
 
   // Month navigation functions
   const goToPreviousMonth = () => {
+    console.log(`Switching from ${currentMonth} to previous month. Current data:`, Array.from(checkedBoxes))
+    // Only save current data if it's not empty
+    if (checkedBoxes.size > 0) {
+      console.log(`Saving non-empty data for ${currentMonth}`)
+      saveLocalSubscriptions(currentMonth, checkedBoxes)
+    } else {
+      console.log(`Skipping save for ${currentMonth} - data is empty`)
+    }
+    
     const previousMonth = getPreviousMonth(currentMonth)
+    console.log(`Switching to month: ${previousMonth}`)
     setCurrentMonth(previousMonth)
   }
 
   const goToNextMonth = () => {
+    console.log(`Switching from ${currentMonth} to next month. Current data:`, Array.from(checkedBoxes))
+    // Only save current data if it's not empty
+    if (checkedBoxes.size > 0) {
+      console.log(`Saving non-empty data for ${currentMonth}`)
+      saveLocalSubscriptions(currentMonth, checkedBoxes)
+    } else {
+      console.log(`Skipping save for ${currentMonth} - data is empty`)
+    }
+    
     const nextMonth = getNextMonth(currentMonth)
+    console.log(`Switching to month: ${nextMonth}`)
     setCurrentMonth(nextMonth)
   }
 
@@ -178,8 +199,7 @@ export default function SubscriptionTracker() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="space-y-2">
-            <h1 className="text-2xl font-bold tracking-tight text-balance font-mono">Subscription Tracker</h1>
-            <p className="text-sm text-muted-foreground font-mono">{formatMonthDisplay(currentMonth)}</p>
+            <h1 className="text-2xl font-bold tracking-tight text-balance font-mono">{formatMonthDisplay(currentMonth)}</h1>
           </div>
           <div className="flex items-center gap-2">
             {session?.user ? (
@@ -291,7 +311,7 @@ export default function SubscriptionTracker() {
         <Card className="p-6">
           <div className="space-y-4">
             <h2 className="text-lg font-semibold font-mono">Customer Slots</h2>
-            <div className="grid grid-cols-10 sm:grid-cols-15 md:grid-cols-25 gap-1">
+            <div className="grid grid-cols-10 sm:grid-cols-15 md:grid-cols-20 lg:grid-cols-25 gap-1 w-full">
               {Array.from({ length: TOTAL_SLOTS }, (_, i) => i).map((index) => {
                 const isChecked = checkedBoxes.has(index)
                 const isMilestone = index + 1 === 200 || index + 1 === 300 || index + 1 === 400
@@ -307,7 +327,7 @@ export default function SubscriptionTracker() {
                   <button
                     key={index}
                     onClick={() => toggleCheckbox(index)}
-                    className="relative aspect-square border transition-all duration-200 hover:scale-125 min-h-[44px] sm:min-h-[32px]"
+                    className="relative aspect-square border transition-colors duration-200 hover:bg-green-300/30 min-h-[32px] sm:min-h-[28px] md:min-h-[24px]"
                     style={{
                       backgroundColor: isChecked ? "rgb(186, 255, 201)" : undefined,
                       borderColor: isChecked ? "rgb(186, 255, 201)" : undefined,
@@ -357,6 +377,24 @@ export default function SubscriptionTracker() {
                 <ChevronLeft className="h-4 w-4 mr-2" />
                 Previous month
               </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={debugLocalStorage}
+                  className="font-mono text-xs"
+                >
+                  Debug
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={clearLocalSubscriptions}
+                  className="font-mono text-xs"
+                >
+                  Clear
+                </Button>
+              </div>
               <Button
                 variant="outline"
                 size="sm"
