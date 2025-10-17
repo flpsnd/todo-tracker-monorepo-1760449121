@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { Plus, Eye, EyeOff, Trash2, X, ChevronLeft } from "lucide-react"
 import { AnimatePresence } from "framer-motion"
 import { authClient } from "@/lib/auth-client"
-import { loadLocalNotes, saveLocalNotes, addDeletedNote, removeDeletedNote, getDeletedNotes, type Note } from "@/lib/local-storage"
+import { loadLocalNotes, saveLocalNotes, addDeletedNote, removeDeletedNote, getDeletedNotes, saveCurrentNoteId, loadCurrentNoteId, type Note } from "@/lib/local-storage"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -89,6 +89,22 @@ export default function Home() {
     // Load notes from localStorage immediately
     const localNotes = loadLocalNotes()
     setNotes(localNotes)
+    
+    // Try to restore the current note
+    const currentNoteId = loadCurrentNoteId()
+    if (currentNoteId) {
+      const noteToRestore = localNotes.find(note => note.id === currentNoteId)
+      if (noteToRestore) {
+        setCurrentNote(noteToRestore)
+        setFormData({ title: noteToRestore.title, content: noteToRestore.content })
+        
+        // Set content in contentEditable div
+        if (contentRef.current) {
+          contentRef.current.innerHTML = noteToRestore.content
+        }
+      }
+    }
+    
     setHasInitialized(true)
   }, [hasInitialized])
 
@@ -112,6 +128,9 @@ export default function Home() {
       )
       setNotes(updatedNotes)
       saveLocalNotes(updatedNotes)
+      
+      // Save current note ID
+      saveCurrentNoteId(updatedNote.id)
     } else {
       // Create new note
       const newNote: Note = {
@@ -124,6 +143,9 @@ export default function Home() {
       const updatedNotes = [newNote, ...notes]
       setNotes(updatedNotes)
       saveLocalNotes(updatedNotes)
+      
+      // Save current note ID
+      saveCurrentNoteId(newNote.id)
     }
   }, [formData, currentNote, notes])
 
@@ -136,6 +158,15 @@ export default function Home() {
     return () => clearTimeout(timeoutId)
   }, [formData, autoSave])
 
+  // Update browser tab title based on current note
+  useEffect(() => {
+    if (currentNote && currentNote.title && currentNote.title !== "Untitled") {
+      document.title = currentNote.title
+    } else {
+      document.title = "Journal"
+    }
+  }, [currentNote])
+
   const createNewNote = () => {
     // Save current note if it has content
     if (currentNote && (formData.title.trim() || formData.content.trim())) {
@@ -147,6 +178,9 @@ export default function Home() {
     setFormData({ title: "", content: "" })
     setShowHistory(false)
     
+    // Clear current note ID from localStorage
+    saveCurrentNoteId(null)
+    
     // Clear contentEditable div
     if (contentRef.current) {
       contentRef.current.innerHTML = ""
@@ -157,6 +191,9 @@ export default function Home() {
     setCurrentNote(note)
     setFormData({ title: note.title, content: note.content })
     setShowHistory(false)
+    
+    // Save current note ID
+    saveCurrentNoteId(note.id)
     
     // Set content in contentEditable div
     if (contentRef.current) {
@@ -303,6 +340,45 @@ export default function Home() {
             onInput={(e) => {
               const content = e.currentTarget.innerHTML
               setFormData(prev => ({ ...prev, content }))
+              
+              // Check for list patterns after input with a small delay
+              setTimeout(() => {
+                const selection = window.getSelection()
+                if (!selection || selection.rangeCount === 0) return
+                
+                const range = selection.getRangeAt(0)
+                let node = range.startContainer
+                
+                // Get the current div element
+                let divElement: HTMLElement | null = null
+                if (node.nodeType === Node.TEXT_NODE) {
+                  divElement = node.parentElement as HTMLElement
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                  divElement = node as HTMLElement
+                }
+                
+                // Check if we're in a div at the root level (not inside a list)
+                if (divElement?.tagName === 'DIV' && 
+                    divElement.parentElement === contentRef.current) {
+                  
+                  const text = divElement.textContent || ''
+                  
+                  // Check for bullet patterns: "* " or "- " (with space)
+                  const bulletMatch = text.match(/^[\*\-]\s$/)
+                  if (bulletMatch) {
+                    createUnorderedList(divElement)
+                    return
+                  }
+                  
+                  // Check for numbered pattern: "number. " (with space)
+                  const numberedMatch = text.match(/^(\d+)\.\s$/)
+                  if (numberedMatch) {
+                    const startNumber = parseInt(numberedMatch[1])
+                    createOrderedList(divElement, startNumber)
+                    return
+                  }
+                }
+              }, 10) // Small delay to ensure DOM is updated
             }}
             onKeyDown={(e) => {
               // Handle formatting shortcuts
@@ -337,45 +413,6 @@ export default function Home() {
                 }
               }
 
-              // Handle automatic list creation on space key
-              if (e.key === ' ') {
-                const selection = window.getSelection()
-                if (!selection || selection.rangeCount === 0) return
-                
-                const range = selection.getRangeAt(0)
-                let node = range.startContainer
-                
-                // Get the current div element
-                let divElement: HTMLElement | null = null
-                if (node.nodeType === Node.TEXT_NODE) {
-                  divElement = node.parentElement as HTMLElement
-                } else if (node.nodeType === Node.ELEMENT_NODE) {
-                  divElement = node as HTMLElement
-                }
-                
-                // Check if we're in a div at the root level (not inside a list)
-                if (divElement?.tagName === 'DIV' && 
-                    divElement.parentElement === contentRef.current) {
-                  
-                  const text = divElement.textContent || ''
-                  
-                  // Check for bullet patterns: "*" or "-" at start of line
-                  if (text === '*' || text === '-') {
-                    e.preventDefault()
-                    createUnorderedList(divElement)
-                    return
-                  }
-                  
-                  // Check for numbered pattern: "number." at start of line
-                  const numberedMatch = text.match(/^(\d+)\.$/)
-                  if (numberedMatch) {
-                    e.preventDefault()
-                    const startNumber = parseInt(numberedMatch[1])
-                    createOrderedList(divElement, startNumber)
-                    return
-                  }
-                }
-              }
 
 
 
@@ -427,8 +464,8 @@ export default function Home() {
       {/* History panel */}
       <AnimatePresence>
         {showHistory && (
-          <div className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50 overflow-y-auto">
-            <div className="max-w-2xl mx-auto py-8 pb-20">
+          <div className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50">
+            <div className="max-w-2xl mx-auto py-8 pb-[200px]">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold tracking-tight text-balance font-mono">Saved Notes</h2>
                 <ThemeToggle />
@@ -440,10 +477,10 @@ export default function Home() {
                     <p className="font-mono text-sm text-muted-foreground">No saved notes yet.</p>
                   </div>
                 ) : (
-                  notes.map((note) => (
+                  notes.map((note, index) => (
                     <div
                       key={note.id}
-                      className="note-item cursor-pointer group pb-5 border-b border-border"
+                      className={`note-item cursor-pointer group pb-5 ${index < notes.length - 1 ? 'border-b border-border' : ''}`}
                       onClick={() => openNote(note)}
                     >
                       <div className="space-y-2">
@@ -467,7 +504,7 @@ export default function Home() {
                         </div>
                         
                         <div className="font-mono text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap line-clamp-3">
-                          {truncateContent(note.content)}
+                          {note.content}
                         </div>
                         
                         <div className="mt-4 text-xs text-muted-foreground font-mono">
@@ -489,6 +526,16 @@ export default function Home() {
       <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-50">
         <div className="mx-auto max-w-2xl">
           <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={createNewNote}
+                className="font-mono"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                New note
+              </Button>
+            </div>
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setShowHistory(!showHistory)}
@@ -509,16 +556,6 @@ export default function Home() {
                   </>
                 )}
               </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={createNewNote}
-                className="font-mono"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                New note
-              </Button>
             </div>
           </div>
         </div>

@@ -5,9 +5,15 @@
   "scripts": {
     "dev:todo": "pnpm --filter todo dev",
     "dev:tracker": "pnpm --filter tracker dev",
+    "dev:notes": "pnpm --filter notes dev",
+    "dev:ide-board": "pnpm --filter ide-board dev",
+    "dev:hub": "pnpm --filter hub dev",
     "dev:all": "pnpm --parallel --filter './apps/*' dev",
     "build:todo": "pnpm --filter todo build",
     "build:tracker": "pnpm --filter tracker build",
+    "build:notes": "pnpm --filter notes build",
+    "build:ide-board": "pnpm --filter ide-board build",
+    "build:hub": "pnpm --filter hub build",
     "build:all": "pnpm --parallel --filter './apps/*' build",
     "lint": "pnpm --filter './apps/*' lint",
     "type-check": "pnpm --filter './apps/*' type-check"

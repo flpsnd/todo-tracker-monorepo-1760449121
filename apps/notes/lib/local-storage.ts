@@ -14,6 +14,7 @@ export interface DeletedNote {
 
 const STORAGE_KEY = "notes-local";
 const DELETED_NOTES_KEY = "notes-deleted-notes";
+const CURRENT_NOTE_KEY = "notes-current-note";
 
 export function loadLocalNotes(): Note[] {
   if (typeof window === "undefined") return [];
@@ -103,6 +104,29 @@ export function clearDeletedNotes(): void {
     localStorage.removeItem(DELETED_NOTES_KEY);
   } catch (error) {
     console.error("Failed to clear deleted notes:", error);
+  }
+}
+
+export function saveCurrentNoteId(noteId: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (noteId) {
+      localStorage.setItem(CURRENT_NOTE_KEY, noteId);
+    } else {
+      localStorage.removeItem(CURRENT_NOTE_KEY);
+    }
+  } catch (error) {
+    console.error("Failed to save current note ID:", error);
+  }
+}
+
+export function loadCurrentNoteId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(CURRENT_NOTE_KEY);
+  } catch (error) {
+    console.error("Failed to load current note ID:", error);
+    return null;
   }
 }
 
