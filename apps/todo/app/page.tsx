@@ -17,7 +17,8 @@ import { Toaster } from "@/components/ui/toaster"
 import { useToast } from "@/components/ui/use-toast"
 import { ToastAction } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
-import { Trash2, X, RefreshCw } from "lucide-react"
+import { Trash2, X, RefreshCw, CheckSquare } from "lucide-react"
+import { ColorPicker } from "@/components/color-picker"
 import { ErrorBoundary } from "@/components/error-boundary"
 // import { useConvexQueryWithErrorHandling, useConvexMutationWithErrorHandling } from "@/lib/use-convex-query"
 
@@ -575,6 +576,50 @@ export default function Home() {
     setSelectedTaskIds([])
   }
 
+  const handleBulkColorChange = async (newColor: string) => {
+    if (selectedTaskIds.length === 0) return
+
+    const updatedTasks = tasks.map((task) => 
+      selectedTaskIds.includes(task.id) 
+        ? { ...task, color: newColor }
+        : task
+    )
+    setTasks(updatedTasks)
+    saveLocalTasks(updatedTasks)
+    
+    // If authenticated, sync to Convex
+    if (session?.user) {
+      try {
+        setSyncStatus("syncing")
+        for (const taskId of selectedTaskIds) {
+          const task = tasks.find(t => t.id === taskId)
+          if (task?._id) {
+            await updateTaskMutation({
+              taskId: task._id,
+              color: newColor,
+            })
+          }
+        }
+        setSyncStatus("synced")
+      } catch (error) {
+        console.error("Failed to sync bulk color change:", error)
+        setSyncStatus("error")
+        toast({
+          title: "Sync Error",
+          description: "Failed to sync color changes. Changes saved locally.",
+          variant: "destructive",
+        })
+      }
+    }
+
+    // Show success toast
+    toast({
+      title: "Color updated",
+      description: `${selectedTaskIds.length} task${selectedTaskIds.length !== 1 ? 's' : ''} updated`,
+      duration: 3000
+    })
+  }
+
   const sections = Array.from({ length: 30 }, (_, i) => getDayInfo(i))
 
   return (
@@ -687,41 +732,49 @@ export default function Home() {
               {/* Multi-purpose delete button */}
               {isSelectMode ? (
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant="destructive"
-                    size="sm"
+                  <button
                     onClick={handleBulkDelete}
                     disabled={selectedTaskIds.length === 0}
-                    className="font-mono"
+                    className={`rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm disabled:opacity-50 disabled:cursor-not-allowed ${
+                      selectedTaskIds.length === 0 
+                        ? "bg-background text-muted-foreground" 
+                        : "bg-red-500 hover:bg-red-600 text-white border-red-500"
+                    }`}
                   >
-                    <Trash2 className="h-4 w-4 mr-2" />
+                    <Trash2 className="h-4 w-4" />
                     Delete ({selectedTaskIds.length})
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
+                  </button>
+                  <ColorPicker
+                    currentColor="#ffb3ba"
+                    onColorChange={handleBulkColorChange}
+                    side="top"
+                    trigger={
+                      <button className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm bg-background">
+                        Change color
+                      </button>
+                    }
+                  />
+                  <button
                     onClick={cancelSelectMode}
-                    className="font-mono"
+                    className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm bg-background"
                   >
-                    <X className="h-4 w-4 mr-2" />
+                    <X className="h-4 w-4" />
                     Cancel
-                  </Button>
+                  </button>
                 </div>
               ) : (
-                <Button
-                  variant={isDragging ? "destructive" : "outline"}
-                  size="sm"
+                <button
                   onClick={toggleSelectMode}
                   data-delete-button
-                  className={`font-mono transition-colors ${
+                  className={`rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm ${
                     isDragging 
-                      ? "bg-red-500 hover:bg-red-600 text-white" 
+                      ? "bg-red-500 hover:bg-red-600 text-white border-red-500" 
                       : ""
                   }`}
                 >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  {isDragging ? "Drop here to delete" : "Select to delete"}
-                </Button>
+                  <CheckSquare className="h-4 w-4" />
+                  {isDragging ? "Drop here to delete" : "Select"}
+                </button>
               )}
             </div>
             <button

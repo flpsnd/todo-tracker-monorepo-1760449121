@@ -74,4 +74,13 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("identifier", ["identifier"]),
+
+  // Email leads table for newsletter signups
+  leadsEmail: defineTable({
+    email: v.string(),
+    source: v.string(), // e.g., "hub", "todo", "tracker", etc.
+    userAgent: v.optional(v.string()),
+    referrer: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("email", ["email"]),
 });

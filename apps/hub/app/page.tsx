@@ -2,10 +2,33 @@
 
 import { ThemeToggle } from "@/components/theme-toggle"
 import { AppCard } from "@/components/app-card"
+import dynamic from "next/dynamic"
+
+const ClientBottomBar = dynamic(() => import("@/components/client-bottom-bar").then(mod => ({ default: mod.ClientBottomBar })), {
+  ssr: false,
+  loading: () => (
+    <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-50">
+      <div className="mx-auto max-w-2xl">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center">
+            <p className="font-mono text-sm text-muted-foreground">
+              Sign up for news about Caalm
+            </p>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <div className="w-64 h-9 bg-muted animate-pulse rounded-md"></div>
+            <div className="w-20 h-9 bg-muted animate-pulse rounded-md"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+})
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background pb-24">
       {/* Header */}
       <header>
         <div className="max-w-2xl mx-auto px-4 py-6">
@@ -43,6 +66,9 @@ export default function Home() {
           </div>
         </section>
       </main>
+
+      {/* Bottom Bar */}
+      <ClientBottomBar />
     </div>
   )
 }

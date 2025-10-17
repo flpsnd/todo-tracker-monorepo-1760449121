@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { CustomCheckbox } from "@/components/ui/custom-checkbox"
+import { ColorPicker } from "@/components/color-picker"
 import type { Task } from "@/app/page"
 
 interface TaskCardProps {
@@ -32,6 +33,9 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
   
   // Hover state for placeholder
   const [isHovered, setIsHovered] = useState(false)
+  
+  // Color picker dropdown state
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState(false)
   
   // Throttle drag detection to improve performance
   const lastDetectionTime = useRef(0)
@@ -194,14 +198,33 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
                 autoFocus
               />
             ) : (
-              <h3 
-                className={`font-mono font-medium text-black cursor-pointer hover:bg-black/5 rounded px-1 py-0.5 transition-colors flex-1 ${
-                  task.completed ? "line-through" : ""
-                }`}
-                onClick={() => startEditing('title')}
-              >
-                {task.title}
-              </h3>
+              <div className="flex items-center justify-between flex-1">
+                <h3 
+                  className={`font-mono font-medium text-black cursor-pointer hover:bg-black/5 rounded px-1 py-0.5 transition-colors ${
+                    task.completed ? "line-through" : ""
+                  }`}
+                  onClick={() => startEditing('title')}
+                >
+                  {task.title}
+                </h3>
+                {!isSelectMode && (
+                  <div 
+                    className={`transition-all duration-200 ease-in-out overflow-hidden ${
+                      (isHovered || isColorPickerOpen)
+                        ? "max-h-6 opacity-100" 
+                        : "max-h-0 opacity-0"
+                    }`}
+                  >
+                    <ColorPicker
+                      currentColor={task.color}
+                      onColorChange={(newColor) => onUpdateTask(task.id, { color: newColor })}
+                      onOpenChange={setIsColorPickerOpen}
+                      side="bottom"
+                      className="h-5 w-5"
+                    />
+                  </div>
+                )}
+              </div>
             )}
           </div>
           

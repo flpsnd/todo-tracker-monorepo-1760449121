@@ -1,0 +1,137 @@
+"use client"
+
+import { useState } from "react"
+import { ChevronLeft, Trash2, Clock } from "lucide-react"
+import { AnimatePresence } from "framer-motion"
+import { Button } from "@/components/ui/button"
+import { ThemeToggle } from "@/components/theme-toggle"
+import { TimerSession, formatTime, deleteSession } from "@/lib/local-storage"
+
+interface SessionHistoryProps {
+  isOpen: boolean
+  onClose: () => void
+  sessions: TimerSession[]
+  onSessionsChange: (sessions: TimerSession[]) => void
+}
+
+export function SessionHistory({ isOpen, onClose, sessions, onSessionsChange }: SessionHistoryProps) {
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  const handleDelete = (sessionId: string) => {
+    setDeletingId(sessionId)
+    deleteSession(sessionId)
+    const updatedSessions = sessions.filter(session => session.id !== sessionId)
+    onSessionsChange(updatedSessions)
+    
+    // Reset deleting state after a short delay
+    setTimeout(() => setDeletingId(null), 300)
+  }
+
+  const formatDate = (timestamp: number) => {
+    return new Date(timestamp).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
+
+  const formatDuration = (ms: number) => {
+    const totalSeconds = Math.floor(ms / 1000)
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${seconds}s`
+    } else if (minutes > 0) {
+      return `${minutes}m ${seconds}s`
+    } else {
+      return `${seconds}s`
+    }
+  }
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50">
+          <div className="max-w-2xl mx-auto py-8 pb-[200px]">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold tracking-tight text-balance font-mono">
+                Timer History
+              </h2>
+              <ThemeToggle />
+            </div>
+            
+            <div className="space-y-6">
+              {sessions.length === 0 ? (
+                <div className="rounded-lg border-2 border-dashed border-border p-8 text-center">
+                  <p className="font-mono text-sm text-muted-foreground">
+                    No completed sessions yet.
+                  </p>
+                </div>
+              ) : (
+                sessions.map((session, index) => (
+                  <div
+                    key={session.id}
+                    className={`session-item cursor-pointer group pb-5 ${
+                      index < sessions.length - 1 ? 'border-b border-border' : ''
+                    } ${deletingId === session.id ? 'opacity-50' : ''}`}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <h3 className="font-mono text-lg font-semibold leading-tight">
+                            {session.name}
+                          </h3>
+                          <div className="flex items-center gap-4 mt-2">
+                            <div className="font-mono text-2xl font-bold text-foreground">
+                              {formatTime(session.duration)}
+                            </div>
+                            <div className="font-mono text-sm text-muted-foreground">
+                              {formatDuration(session.duration)}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(session.id)}
+                            className="font-mono text-destructive hover:text-destructive-foreground hover:bg-destructive"
+                            disabled={deletingId === session.id}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                      
+                      <div className="mt-4 text-xs text-muted-foreground font-mono">
+                        <span>Completed {formatDate(session.completedAt)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          
+          {/* Back button */}
+          <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-50">
+            <div className="mx-auto max-w-2xl">
+              <Button
+                variant="outline"
+                onClick={onClose}
+                className="font-mono"
+              >
+                <ChevronLeft className="h-4 w-4 mr-2" />
+                Back to Timer
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </AnimatePresence>
+  )
+}

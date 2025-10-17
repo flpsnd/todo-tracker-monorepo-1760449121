@@ -9,10 +9,10 @@ import { Suspense } from "react"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "Caalm",
-  description: "A suite of thoughtfully crafted productivity tools designed for focus, simplicity, and calm.",
+  title: "Timer",
+  description: "A minimalistic Pomodoro-style timer application",
   icons: {
-    icon: "/caalml.jpg",
+    icon: "/timer.jpg",
   },
 }
 
