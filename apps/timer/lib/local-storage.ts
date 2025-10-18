@@ -5,6 +5,12 @@ export interface TimerSession {
   completedAt: number // timestamp
 }
 
+export interface DeletedSession {
+  session: TimerSession;
+  deletedAt: number;
+  timeoutId?: number;
+}
+
 export interface CurrentTimer {
   name: string
   initialTime: number // milliseconds
@@ -15,6 +21,7 @@ export interface CurrentTimer {
 
 const SESSIONS_KEY = "timer-sessions";
 const CURRENT_TIMER_KEY = "timer-current";
+const DELETED_SESSIONS_KEY = "timer-deleted-sessions";
 
 export function loadLocalSessions(): TimerSession[] {
   if (typeof window === "undefined") return [];
@@ -128,4 +135,58 @@ export function getTimeInputPlaceholder(ms: number): string {
     return "HH:MM";
   }
   return "MM:SS";
+}
+
+// Deleted sessions functionality
+export function getDeletedSessions(): DeletedSession[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const data = localStorage.getItem(DELETED_SESSIONS_KEY);
+    const deletedSessions = data ? JSON.parse(data) : [];
+    
+    // Clean up expired sessions (older than 60 seconds)
+    const now = Date.now();
+    const validSessions = deletedSessions.filter((deletedSession: DeletedSession) => {
+      return now - deletedSession.deletedAt < 60000; // 60 seconds
+    });
+    
+    // Update localStorage if we removed expired sessions
+    if (validSessions.length !== deletedSessions.length) {
+      localStorage.setItem(DELETED_SESSIONS_KEY, JSON.stringify(validSessions));
+    }
+    
+    return validSessions;
+  } catch (error) {
+    console.error("Failed to load deleted sessions:", error);
+    return [];
+  }
+}
+
+export function addDeletedSession(session: TimerSession): void {
+  if (typeof window === "undefined") return;
+  try {
+    const deletedSessions = getDeletedSessions();
+    const deletedSession: DeletedSession = {
+      session,
+      deletedAt: Date.now(),
+    };
+    
+    deletedSessions.push(deletedSession);
+    localStorage.setItem(DELETED_SESSIONS_KEY, JSON.stringify(deletedSessions));
+  } catch (error) {
+    console.error("Failed to add deleted session:", error);
+  }
+}
+
+export function removeDeletedSession(sessionId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const deletedSessions = getDeletedSessions();
+    const filteredSessions = deletedSessions.filter((deletedSession: DeletedSession) => 
+      deletedSession.session.id !== sessionId
+    );
+    localStorage.setItem(DELETED_SESSIONS_KEY, JSON.stringify(filteredSessions));
+  } catch (error) {
+    console.error("Failed to remove deleted session:", error);
+  }
 }

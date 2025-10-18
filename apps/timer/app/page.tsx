@@ -8,6 +8,9 @@ import { SessionHistory } from "@/components/session-history"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Toaster } from "@/components/ui/toaster"
+import { useToast } from "@/components/ui/use-toast"
+import { ToastAction } from "@/components/ui/toast"
 import { 
   loadLocalSessions, 
   saveLocalSessions, 
@@ -20,7 +23,7 @@ import {
 } from "@/lib/local-storage"
 
 export default function Home() {
-  const [timerName, setTimerName] = useState("Focus Session")
+  const [timerName, setTimerName] = useState("")
   const [timeRemaining, setTimeRemaining] = useState(25 * 60 * 1000) // 25 minutes default
   const [initialTime, setInitialTime] = useState(25 * 60 * 1000)
   const [isRunning, setIsRunning] = useState(false)
@@ -29,8 +32,12 @@ export default function Home() {
   const [showCompletionDialog, setShowCompletionDialog] = useState(false)
   const [hasInitialized, setHasInitialized] = useState(false)
   const [startedAt, setStartedAt] = useState<number | null>(null)
+  const [hasBeenStarted, setHasBeenStarted] = useState(false)
   
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  
+  // Toast hook
+  const { toast } = useToast()
 
   // Initialize app with local-first logic
   useEffect(() => {
@@ -126,6 +133,7 @@ export default function Home() {
       // Start timer
       setIsRunning(true)
       setStartedAt(Date.now())
+      setHasBeenStarted(true)
     }
   }
 
@@ -133,6 +141,7 @@ export default function Home() {
     setIsRunning(false)
     setTimeRemaining(initialTime)
     setStartedAt(null)
+    setHasBeenStarted(false)
   }
 
   const handleTimeChange = (newTime: number) => {
@@ -169,11 +178,12 @@ export default function Home() {
   }
 
   const handleStartNew = () => {
-    setTimerName("Focus Session")
+    setTimerName("")
     setTimeRemaining(25 * 60 * 1000)
     setInitialTime(25 * 60 * 1000)
     setIsRunning(false)
     setStartedAt(null)
+    setHasBeenStarted(false)
     clearCurrentTimer()
   }
 
@@ -283,15 +293,17 @@ export default function Home() {
                 )}
               </Button>
               
-              <Button
-                variant="ghost"
-                onClick={handleReset}
-                className="font-mono"
-                disabled={isRunning}
-              >
-                <RotateCcw className="h-4 w-4 mr-2" />
-                Reset
-              </Button>
+              {hasBeenStarted && (
+                <Button
+                  variant="ghost"
+                  onClick={handleReset}
+                  className="font-mono"
+                  disabled={isRunning}
+                >
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Reset
+                </Button>
+              )}
             </div>
             
             <div className="flex items-center gap-3">
@@ -309,6 +321,9 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* Toast Container */}
+      <Toaster />
     </main>
   )
 }

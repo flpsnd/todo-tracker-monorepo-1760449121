@@ -4,7 +4,7 @@ import { useState } from "react"
 import { motion } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { X } from "lucide-react"
+import { X, Check } from "lucide-react"
 
 interface Color {
   name: string
@@ -88,13 +88,13 @@ export function NoteForm({ onSubmit, onClose, colors }: NoteFormProps) {
 
           <div className="space-y-2">
             <label className="font-mono text-sm font-medium">Color</label>
-            <div className="grid grid-cols-4 gap-2 max-w-[280px]">
+            <div className="grid grid-cols-4 gap-[5px] max-w-[280px]">
               {colors.map((color) => (
                 <button
                   key={color.value}
                   type="button"
                   onClick={() => setSelectedColor(color.value)}
-                  className="h-6 w-6 rounded border-2 transition-all hover:scale-110"
+                  className="h-6 w-6 rounded-full border-2 flex items-center justify-center transition-all hover:scale-110"
                   style={{
                     backgroundColor: color.value,
                     borderColor: selectedColor === color.value 
@@ -104,7 +104,11 @@ export function NoteForm({ onSubmit, onClose, colors }: NoteFormProps) {
                         : "transparent",
                   }}
                   title={color.name}
-                />
+                >
+                  {selectedColor === color.value && (
+                    <Check className="h-3 w-3 text-black" />
+                  )}
+                </button>
               ))}
             </div>
           </div>

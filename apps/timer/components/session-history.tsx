@@ -1,11 +1,13 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronLeft, Trash2, Clock } from "lucide-react"
+import { ChevronLeft, Trash2 } from "lucide-react"
 import { AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { TimerSession, formatTime, deleteSession } from "@/lib/local-storage"
+import { TimerSession, formatTime, deleteSession, addDeletedSession, removeDeletedSession, getDeletedSessions } from "@/lib/local-storage"
+import { useToast } from "@/components/ui/use-toast"
+import { ToastAction } from "@/components/ui/toast"
 
 interface SessionHistoryProps {
   isOpen: boolean
@@ -16,15 +18,88 @@ interface SessionHistoryProps {
 
 export function SessionHistory({ isOpen, onClose, sessions, onSessionsChange }: SessionHistoryProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deletedSessionsQueue, setDeletedSessionsQueue] = useState<Array<{session: TimerSession, timeoutId: NodeJS.Timeout}>>([])
+  
+  // Toast hook
+  const { toast } = useToast()
 
   const handleDelete = (sessionId: string) => {
-    setDeletingId(sessionId)
-    deleteSession(sessionId)
+    const sessionToDelete = sessions.find(s => s.id === sessionId)
+    if (!sessionToDelete) return
+    
+    // Remove from visible sessions immediately
     const updatedSessions = sessions.filter(session => session.id !== sessionId)
     onSessionsChange(updatedSessions)
     
+    // Remove from localStorage immediately to persist deletion
+    deleteSession(sessionId)
+    
+    // Add to localStorage deleted sessions for restore functionality
+    addDeletedSession(sessionToDelete)
+    
+    // Set 60s timeout for permanent deletion from deleted sessions
+    const timeoutId = setTimeout(() => {
+      // Remove from deleted sessions localStorage
+      removeDeletedSession(sessionId)
+    }, 60000)
+    
+    // Add to deleted queue for timeout management
+    setDeletedSessionsQueue(prev => [...prev, { session: sessionToDelete, timeoutId }])
+    
+    // Show toast with restore action
+    toast({
+      title: "Session deleted",
+      description: sessionToDelete.name,
+      action: <ToastAction altText="Restore" onClick={() => restoreSession(sessionId)}>Restore</ToastAction>,
+      duration: 60000
+    })
+    
     // Reset deleting state after a short delay
     setTimeout(() => setDeletingId(null), 300)
+  }
+
+  const restoreSession = (sessionId: string) => {
+    console.log("Attempting to restore session:", sessionId)
+    
+    // Check if session is already in localStorage to prevent duplicates
+    const currentLocalSessions = sessions
+    const currentLocalSessionIds = new Set(currentLocalSessions.map(session => session.id))
+    if (currentLocalSessionIds.has(sessionId)) {
+      console.log("Session is already restored")
+      return
+    }
+    
+    // Get deleted sessions from localStorage
+    const deletedSessions = getDeletedSessions()
+    const deletedItem = deletedSessions.find(item => item.session.id === sessionId)
+    
+    if (!deletedItem) {
+      console.log("Session not found in deleted sessions")
+      return
+    }
+    
+    console.log("Found deleted item:", deletedItem)
+    
+    // Clear timeout from React state
+    const queueItem = deletedSessionsQueue.find(item => item.session.id === sessionId)
+    if (queueItem) {
+      clearTimeout(queueItem.timeoutId)
+      setDeletedSessionsQueue(prev => prev.filter(item => item.session.id !== sessionId))
+    }
+    
+    // Remove from localStorage deleted sessions
+    removeDeletedSession(sessionId)
+    
+    // Add session back to localStorage since it was removed during deletion
+    const updatedLocalSessions = [...currentLocalSessions, deletedItem.session]
+    onSessionsChange(updatedLocalSessions)
+    
+    // Show success toast
+    toast({
+      title: "Session restored",
+      description: deletedItem.session.name,
+      duration: 3000
+    })
   }
 
   const formatDate = (timestamp: number) => {

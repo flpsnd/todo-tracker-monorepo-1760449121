@@ -83,21 +83,20 @@ export function TimerDisplay({ timeRemaining, onTimeChange, isRunning }: TimerDi
 
   const renderTimeDigits = (timeString: string) => {
     const digits = timeString.split('')
-    const colonIndex = digits.indexOf(':')
     
     return (
-      <div className="flex items-center justify-center gap-2 w-full">
+      <div className="flex items-center justify-center gap-1 w-full">
         {digits.map((digit, index) => (
-          <div key={index} className="flex items-center justify-center">
+          <div key={index} className="flex items-center justify-center flex-1">
             {digit === ':' ? (
-              <div className="w-4 h-16 flex items-center justify-center">
-                <div className="w-1 h-8 bg-foreground rounded-full"></div>
+              <div className="w-2 h-16 flex items-center justify-center">
+                <div className="w-0.5 h-8 bg-foreground rounded-full"></div>
               </div>
             ) : (
-              <div className="bg-card border border-border rounded-lg p-4 mx-1 min-w-[4rem] h-20 flex items-center justify-center shadow-sm">
+              <div className="bg-card border border-border rounded-lg p-6 mx-0.5 flex-1 h-24 flex items-center justify-center shadow-sm">
                 <span 
-                  className="font-mono text-6xl font-bold text-foreground"
-                  style={{ fontSize: 'clamp(2.5rem, 8vw, 4rem)' }}
+                  className="font-mono text-8xl font-bold text-foreground"
+                  style={{ fontSize: 'clamp(3rem, 12vw, 6rem)' }}
                 >
                   {digit}
                 </span>

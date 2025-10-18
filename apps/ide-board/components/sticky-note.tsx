@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import { motion } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Trash2 } from "lucide-react"
+import { Trash2, Check } from "lucide-react"
 import { Note } from "@/lib/local-storage"
 
 interface StickyNoteProps {
@@ -32,9 +32,11 @@ export function StickyNote({
 }: StickyNoteProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
+  const [isColorPickerHovered, setIsColorPickerHovered] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [isRotating, setIsRotating] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
+  const [initialRotation, setInitialRotation] = useState(0)
   const [content, setContent] = useState(note.content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const noteRef = useRef<HTMLDivElement>(null)
@@ -63,7 +65,9 @@ export function StickyNote({
     // Check if clicking on a corner handle
     const target = e.target as HTMLElement
     if (target.classList.contains('corner-handle')) {
+      e.preventDefault()
       setIsRotating(true)
+      setInitialRotation(note.rotation)
     } else {
       setIsDragging(true)
     }
@@ -98,7 +102,7 @@ export function StickyNote({
         
         const angle = Math.atan2(e.clientY - centerY, e.clientX - centerX)
         const degrees = (angle * 180) / Math.PI
-        const newRotation = degrees
+        const newRotation = initialRotation + (degrees - initialRotation)
         
         onUpdate({ rotation: newRotation })
       }
@@ -136,7 +140,7 @@ export function StickyNote({
             
             const angle = Math.atan2(e.clientY - centerY, e.clientX - centerX)
             const degrees = (angle * 180) / Math.PI
-            const newRotation = degrees
+            const newRotation = initialRotation + (degrees - initialRotation)
             
             onUpdate({ rotation: newRotation })
           }
@@ -156,7 +160,7 @@ export function StickyNote({
         document.removeEventListener('mouseup', handleGlobalMouseUp)
       }
     }
-  }, [isDragging, isRotating, dragStart, note.x, note.y, note.rotation, zoom, onUpdate])
+  }, [isDragging, isRotating, dragStart, note.x, note.y, note.rotation, initialRotation, zoom, onUpdate])
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -220,7 +224,9 @@ export function StickyNote({
       }}
       onMouseDown={handleMouseDown}
       onMouseLeave={(e) => {
-        setIsHovered(false)
+        if (!isColorPickerHovered) {
+          setIsHovered(false)
+        }
       }}
       onDoubleClick={handleDoubleClick}
       onMouseEnter={() => setIsHovered(true)}
@@ -229,8 +235,12 @@ export function StickyNote({
       drag={false} // We handle drag manually
     >
       {/* Color picker (appears on hover) */}
-      {isHovered && !isSelectMode && (
-        <div className="absolute -top-8 left-0 flex gap-1 p-1 bg-background border border-border rounded shadow-lg">
+      {(isHovered || isColorPickerHovered) && !isSelectMode && (
+        <div 
+          className="absolute -top-8 left-0 flex gap-1 p-1 bg-background border border-border rounded shadow-lg z-50"
+          onMouseEnter={() => setIsColorPickerHovered(true)}
+          onMouseLeave={() => setIsColorPickerHovered(false)}
+        >
           {[
             '#ffb3ba', '#ffdfba', '#ffffba', '#baffc9',
             '#bae1ff', '#e0bbff', '#ffffff', '#000000'
@@ -241,10 +251,17 @@ export function StickyNote({
                 e.stopPropagation()
                 handleColorChange(color)
               }}
-              className="w-4 h-4 rounded border border-gray-300 hover:scale-110 transition-transform"
-              style={{ backgroundColor: color }}
+              className="w-6 h-6 rounded-full border-2 flex items-center justify-center hover:scale-110 transition-transform"
+              style={{ 
+                backgroundColor: color,
+                borderColor: note.color === color ? "#000" : (color === "#ffffff" || color === "#000000") ? "#e5e5e5" : "transparent"
+              }}
               title={`Change to ${color}`}
-            />
+            >
+              {note.color === color && (
+                <Check className="h-3 w-3 text-black" />
+              )}
+            </button>
           ))}
         </div>
       )}
@@ -252,9 +269,8 @@ export function StickyNote({
       {/* Delete button (appears on hover) */}
       {isHovered && !isSelectMode && (
         <Button
-          variant="destructive"
           size="icon"
-          className="absolute -top-2 -right-2 w-6 h-6 p-0 rounded-full"
+          className="absolute top-2 right-2 w-7 h-7 p-0 bg-red-500 hover:bg-red-600 text-white"
           onClick={handleDelete}
         >
           <Trash2 className="h-3 w-3" />
