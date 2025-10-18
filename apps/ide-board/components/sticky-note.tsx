@@ -33,18 +33,44 @@ export function StickyNote({
   const [isEditing, setIsEditing] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
   const [isColorPickerHovered, setIsColorPickerHovered] = useState(false)
+  const [isActive, setIsActive] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [isRotating, setIsRotating] = useState(false)
+  const [isResizing, setIsResizing] = useState(false)
+  const [resizeHandle, setResizeHandle] = useState<string | null>(null)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [initialRotation, setInitialRotation] = useState(0)
+  const [initialSize, setInitialSize] = useState({ width: 0, height: 0 })
+  const [initialPosition, setInitialPosition] = useState({ x: 0, y: 0 })
   const [content, setContent] = useState(note.content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const noteRef = useRef<HTMLDivElement>(null)
+
+  // Helper function to rotate a vector by an angle in radians
+  const rotateVector = (x: number, y: number, angle: number): [number, number] => {
+    const cos = Math.cos(angle)
+    const sin = Math.sin(angle)
+    return [x * cos - y * sin, x * sin + y * cos]
+  }
 
   // Update content when note changes
   useEffect(() => {
     setContent(note.content)
   }, [note.content])
+
+  // Handle click outside to deactivate note
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (isActive && noteRef.current && !noteRef.current.contains(e.target as Node)) {
+        setIsActive(false)
+      }
+    }
+
+    if (isActive) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isActive])
 
   // Focus textarea when editing starts
   useEffect(() => {
@@ -54,6 +80,13 @@ export function StickyNote({
     }
   }, [isEditing])
 
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!isSelectMode) {
+      setIsActive(true)
+    }
+  }
+
   const handleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation()
     
@@ -62,13 +95,24 @@ export function StickyNote({
       return
     }
 
-    // Check if clicking on a corner handle
     const target = e.target as HTMLElement
-    if (target.classList.contains('corner-handle')) {
+    
+    // Check for resize handles
+    if (target.classList.contains('resize-handle')) {
       e.preventDefault()
-      setIsRotating(true)
-      setInitialRotation(note.rotation)
-    } else {
+      // Check if holding Alt/Option key for rotation
+      if (e.altKey) {
+        setIsRotating(true)
+        setInitialRotation(note.rotation)
+      } else {
+        setIsResizing(true)
+        setResizeHandle(target.dataset.handle || null)
+        setInitialSize({ width: note.width, height: note.height })
+        setInitialPosition({ x: note.x, y: note.y })
+      }
+    }
+    // Regular drag
+    else {
       setIsDragging(true)
     }
     
@@ -93,6 +137,45 @@ export function StickyNote({
         x: e.clientX,
         y: e.clientY,
       })
+    } else if (isResizing && resizeHandle) {
+      // Calculate world delta
+      const deltaX = (e.clientX - dragStart.x) / zoom
+      const deltaY = (e.clientY - dragStart.y) / zoom
+      
+      // Convert to local coordinates (rotate by -rotation)
+      const rotationRad = (-note.rotation * Math.PI) / 180
+      const [deltaXL, deltaYL] = rotateVector(deltaX, deltaY, rotationRad)
+      
+      let newWidth = initialSize.width
+      let newHeight = initialSize.height
+      let newX = initialPosition.x
+      let newY = initialPosition.y
+      
+      // Apply resize based on handle
+      const minSize = 100
+      
+      if (resizeHandle.includes('right')) {
+        newWidth = Math.max(minSize, initialSize.width + deltaXL)
+      }
+      if (resizeHandle.includes('left')) {
+        newWidth = Math.max(minSize, initialSize.width - deltaXL)
+        // Move position for left edge
+        const [moveX, moveY] = rotateVector(deltaXL, 0, note.rotation * Math.PI / 180)
+        newX = initialPosition.x + moveX
+        newY = initialPosition.y + moveY
+      }
+      if (resizeHandle.includes('bottom')) {
+        newHeight = Math.max(minSize, initialSize.height + deltaYL)
+      }
+      if (resizeHandle.includes('top')) {
+        newHeight = Math.max(minSize, initialSize.height - deltaYL)
+        // Move position for top edge
+        const [moveX, moveY] = rotateVector(0, deltaYL, note.rotation * Math.PI / 180)
+        newX = initialPosition.x + moveX
+        newY = initialPosition.y + moveY
+      }
+      
+      onUpdate({ width: newWidth, height: newHeight, x: newX, y: newY })
     } else if (isRotating) {
       // Calculate rotation based on mouse position relative to note center
       if (noteRef.current) {
@@ -100,9 +183,17 @@ export function StickyNote({
         const centerX = rect.left + rect.width / 2
         const centerY = rect.top + rect.height / 2
         
-        const angle = Math.atan2(e.clientY - centerY, e.clientX - centerX)
-        const degrees = (angle * 180) / Math.PI
-        const newRotation = initialRotation + (degrees - initialRotation)
+        // Calculate the angle from center to current mouse position
+        const currentAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX)
+        const currentDegrees = (currentAngle * 180) / Math.PI
+        
+        // Calculate the angle from center to initial mouse position
+        const initialAngle = Math.atan2(dragStart.y - centerY, dragStart.x - centerX)
+        const initialDegrees = (initialAngle * 180) / Math.PI
+        
+        // Calculate the difference and apply to initial rotation
+        const angleDifference = currentDegrees - initialDegrees
+        const newRotation = initialRotation + angleDifference
         
         onUpdate({ rotation: newRotation })
       }
@@ -112,11 +203,13 @@ export function StickyNote({
   const handleMouseUp = () => {
     setIsDragging(false)
     setIsRotating(false)
+    setIsResizing(false)
+    setResizeHandle(null)
   }
 
-  // Add global mouse event listeners for dragging and rotating
+  // Add global mouse event listeners for dragging, rotating, and resizing
   useEffect(() => {
-    if (isDragging || isRotating) {
+    if (isDragging || isRotating || isResizing) {
       const handleGlobalMouseMove = (e: MouseEvent) => {
         if (isDragging) {
           // Calculate delta in screen coordinates, then convert to world coordinates
@@ -131,6 +224,45 @@ export function StickyNote({
             x: e.clientX,
             y: e.clientY,
           })
+        } else if (isResizing && resizeHandle) {
+          // Calculate world delta
+          const deltaX = (e.clientX - dragStart.x) / zoom
+          const deltaY = (e.clientY - dragStart.y) / zoom
+          
+          // Convert to local coordinates (rotate by -rotation)
+          const rotationRad = (-note.rotation * Math.PI) / 180
+          const [deltaXL, deltaYL] = rotateVector(deltaX, deltaY, rotationRad)
+          
+          let newWidth = initialSize.width
+          let newHeight = initialSize.height
+          let newX = initialPosition.x
+          let newY = initialPosition.y
+          
+          // Apply resize based on handle
+          const minSize = 100
+          
+          if (resizeHandle.includes('right')) {
+            newWidth = Math.max(minSize, initialSize.width + deltaXL)
+          }
+          if (resizeHandle.includes('left')) {
+            newWidth = Math.max(minSize, initialSize.width - deltaXL)
+            // Move position for left edge
+            const [moveX, moveY] = rotateVector(deltaXL, 0, note.rotation * Math.PI / 180)
+            newX = initialPosition.x + moveX
+            newY = initialPosition.y + moveY
+          }
+          if (resizeHandle.includes('bottom')) {
+            newHeight = Math.max(minSize, initialSize.height + deltaYL)
+          }
+          if (resizeHandle.includes('top')) {
+            newHeight = Math.max(minSize, initialSize.height - deltaYL)
+            // Move position for top edge
+            const [moveX, moveY] = rotateVector(0, deltaYL, note.rotation * Math.PI / 180)
+            newX = initialPosition.x + moveX
+            newY = initialPosition.y + moveY
+          }
+          
+          onUpdate({ width: newWidth, height: newHeight, x: newX, y: newY })
         } else if (isRotating) {
           // Calculate rotation based on mouse position relative to note center
           if (noteRef.current) {
@@ -138,9 +270,17 @@ export function StickyNote({
             const centerX = rect.left + rect.width / 2
             const centerY = rect.top + rect.height / 2
             
-            const angle = Math.atan2(e.clientY - centerY, e.clientX - centerX)
-            const degrees = (angle * 180) / Math.PI
-            const newRotation = initialRotation + (degrees - initialRotation)
+            // Calculate the angle from center to current mouse position
+            const currentAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX)
+            const currentDegrees = (currentAngle * 180) / Math.PI
+            
+            // Calculate the angle from center to initial mouse position
+            const initialAngle = Math.atan2(dragStart.y - centerY, dragStart.x - centerX)
+            const initialDegrees = (initialAngle * 180) / Math.PI
+            
+            // Calculate the difference and apply to initial rotation
+            const angleDifference = currentDegrees - initialDegrees
+            const newRotation = initialRotation + angleDifference
             
             onUpdate({ rotation: newRotation })
           }
@@ -150,6 +290,8 @@ export function StickyNote({
       const handleGlobalMouseUp = () => {
         setIsDragging(false)
         setIsRotating(false)
+        setIsResizing(false)
+        setResizeHandle(null)
       }
 
       document.addEventListener('mousemove', handleGlobalMouseMove)
@@ -160,7 +302,7 @@ export function StickyNote({
         document.removeEventListener('mouseup', handleGlobalMouseUp)
       }
     }
-  }, [isDragging, isRotating, dragStart, note.x, note.y, note.rotation, initialRotation, zoom, onUpdate])
+  }, [isDragging, isRotating, isResizing, resizeHandle, dragStart, note.x, note.y, note.rotation, note.width, note.height, initialRotation, initialSize, initialPosition, zoom, onUpdate])
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -209,19 +351,22 @@ export function StickyNote({
   return (
     <motion.div
       ref={noteRef}
-      className={`absolute min-w-[200px] max-w-[300px] min-h-[150px] p-3 rounded-lg border-2 shadow-lg cursor-move select-none ${
+      className={`absolute p-3 rounded-lg border-2 shadow-lg cursor-move select-none ${
         isSelected ? 'ring-2 ring-blue-500' : ''
       }`}
       style={{
         left: worldX,
         top: worldY,
+        width: note.width,
+        height: note.height,
         backgroundColor: note.color,
         color: note.color === '#000000' ? '#ffffff' : '#000000',
         borderColor: isSelected ? '#3b82f6' : 'rgba(0,0,0,0.1)',
-        zIndex: isDragging || isRotating ? 1000 : 10,
+        zIndex: isDragging || isRotating || isResizing ? 1000 : 10,
         transform: `rotate(${note.rotation}deg)`,
         transformOrigin: 'center',
       }}
+      onClick={handleClick}
       onMouseDown={handleMouseDown}
       onMouseLeave={(e) => {
         if (!isColorPickerHovered) {
@@ -234,8 +379,8 @@ export function StickyNote({
       whileTap={{ scale: 0.98 }}
       drag={false} // We handle drag manually
     >
-      {/* Color picker (appears on hover) */}
-      {(isHovered || isColorPickerHovered) && !isSelectMode && (
+      {/* Color picker (appears when active) */}
+      {isActive && !isSelectMode && (
         <div 
           className="absolute -top-8 left-0 flex gap-1 p-1 bg-background border border-border rounded shadow-lg z-50"
           onMouseEnter={() => setIsColorPickerHovered(true)}
@@ -251,7 +396,7 @@ export function StickyNote({
                 e.stopPropagation()
                 handleColorChange(color)
               }}
-              className="w-6 h-6 rounded-full border-2 flex items-center justify-center hover:scale-110 transition-transform"
+              className="w-6 h-6 rounded-none border-2 flex items-center justify-center hover:scale-110 transition-transform"
               style={{ 
                 backgroundColor: color,
                 borderColor: note.color === color ? "#000" : (color === "#ffffff" || color === "#000000") ? "#e5e5e5" : "transparent"
@@ -266,24 +411,32 @@ export function StickyNote({
         </div>
       )}
 
-      {/* Delete button (appears on hover) */}
-      {isHovered && !isSelectMode && (
+      {/* Delete button (appears when active) */}
+      {isActive && !isSelectMode && (
         <Button
           size="icon"
-          className="absolute top-2 right-2 w-7 h-7 p-0 bg-red-500 hover:bg-red-600 text-white"
+          className="absolute top-2 right-2 w-7 h-7 p-0 border-2 border-red-500 text-red-500 hover:bg-red-50 bg-transparent"
           onClick={handleDelete}
         >
           <Trash2 className="h-3 w-3" />
         </Button>
       )}
 
-      {/* Corner handles for rotation (appears on hover) */}
-      {isHovered && !isSelectMode && (
+      {/* Resize handles (appears when active) */}
+      {isActive && !isSelectMode && (
         <>
-          <div className="corner-handle absolute -top-1 -left-1 w-3 h-3 bg-blue-500 rounded-full cursor-grab hover:bg-blue-600 transition-colors" />
-          <div className="corner-handle absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full cursor-grab hover:bg-blue-600 transition-colors" />
-          <div className="corner-handle absolute -bottom-1 -left-1 w-3 h-3 bg-blue-500 rounded-full cursor-grab hover:bg-blue-600 transition-colors" />
-          <div className="corner-handle absolute -bottom-1 -right-1 w-3 h-3 bg-blue-500 rounded-full cursor-grab hover:bg-blue-600 transition-colors" />
+          {/* Corner resize handles */}
+          <div className="resize-handle absolute -top-1 -left-1 w-3 h-3 bg-background border border-border cursor-nw-resize hover:bg-accent transition-colors" data-handle="top-left" title="Resize (hold Alt to rotate)" />
+          <div className="resize-handle absolute -top-1 -right-1 w-3 h-3 bg-background border border-border cursor-ne-resize hover:bg-accent transition-colors" data-handle="top-right" title="Resize (hold Alt to rotate)" />
+          <div className="resize-handle absolute -bottom-1 -left-1 w-3 h-3 bg-background border border-border cursor-sw-resize hover:bg-accent transition-colors" data-handle="bottom-left" title="Resize (hold Alt to rotate)" />
+          <div className="resize-handle absolute -bottom-1 -right-1 w-3 h-3 bg-background border border-border cursor-se-resize hover:bg-accent transition-colors" data-handle="bottom-right" title="Resize (hold Alt to rotate)" />
+          
+          {/* Side resize handles */}
+          <div className="resize-handle absolute -top-1 left-0 right-0 h-1 bg-background border-t border-border cursor-n-resize hover:bg-accent transition-colors" data-handle="top" title="Resize height" />
+          <div className="resize-handle absolute -bottom-1 left-0 right-0 h-1 bg-background border-b border-border cursor-s-resize hover:bg-accent transition-colors" data-handle="bottom" title="Resize height" />
+          <div className="resize-handle absolute -left-1 top-0 bottom-0 w-1 bg-background border-l border-border cursor-w-resize hover:bg-accent transition-colors" data-handle="left" title="Resize width" />
+          <div className="resize-handle absolute -right-1 top-0 bottom-0 w-1 bg-background border-r border-border cursor-e-resize hover:bg-accent transition-colors" data-handle="right" title="Resize width" />
+          
         </>
       )}
 
@@ -295,13 +448,14 @@ export function StickyNote({
           onChange={handleContentChange}
           onBlur={handleContentBlur}
           onKeyDown={handleKeyDown}
-          className="w-full min-h-[60px] resize-none border-none bg-transparent p-0 font-mono text-sm focus:outline-none"
+          className="w-full h-full resize-none border-none bg-transparent p-0 font-mono text-sm focus:outline-none"
           style={{
             color: note.color === '#000000' ? '#ffffff' : '#000000',
+            height: '100%',
           }}
         />
       ) : (
-        <div className="font-mono text-sm whitespace-pre-wrap break-words">
+        <div className="font-mono text-sm whitespace-pre-wrap break-words h-full overflow-hidden">
           {note.content || 'Double-click to edit'}
         </div>
       )}

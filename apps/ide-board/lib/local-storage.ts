@@ -6,6 +6,8 @@ export interface Note {
   x: number
   y: number
   rotation: number
+  width: number
+  height: number
 }
 
 export interface DeletedNote {
@@ -21,7 +23,14 @@ export function loadLocalNotes(): Note[] {
   if (typeof window === "undefined") return [];
   try {
     const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
+    const notes = data ? JSON.parse(data) : [];
+    
+    // Ensure all notes have width and height with defaults
+    return notes.map(note => ({
+      ...note,
+      width: note.width ?? 240,
+      height: note.height ?? 160
+    }));
   } catch (error) {
     console.error("Failed to load local notes:", error);
     return [];

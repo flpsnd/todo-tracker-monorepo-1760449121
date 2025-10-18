@@ -141,6 +141,8 @@ export default function Home() {
           x: note.x,
           y: note.y,
           rotation: note.rotation || 0,
+          width: note.width ?? 240,
+          height: note.height ?? 160,
         }))
         setNotes(convexNotesFormatted)
         saveLocalNotes(convexNotesFormatted)
@@ -153,7 +155,7 @@ export default function Home() {
     }
   }
 
-  const addNote = async (note: Omit<Note, "id" | "x" | "y" | "rotation">) => {
+  const addNote = async (note: { content: string; color: string; rotation: number; width: number; height: number }) => {
     // Position new note at the center of the current viewport in world coordinates
     const canvasRect = canvasRef.current?.getBoundingClientRect()
     if (!canvasRect) return
@@ -166,7 +168,9 @@ export default function Home() {
       id: crypto.randomUUID(),
       x: centerX,
       y: centerY,
-      rotation: 0,
+      rotation: note.rotation,
+      width: note.width,
+      height: note.height,
     }
     
     // Update local state immediately - ensure notes is an array

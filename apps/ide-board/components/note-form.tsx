@@ -13,7 +13,7 @@ interface Color {
 }
 
 interface NoteFormProps {
-  onSubmit: (note: { content: string; color: string; rotation: number }) => void
+  onSubmit: (note: { content: string; color: string; rotation: number; width: number; height: number }) => void
   onClose: () => void
   colors: Color[]
 }
@@ -30,6 +30,8 @@ export function NoteForm({ onSubmit, onClose, colors }: NoteFormProps) {
       content: content.trim(),
       color: selectedColor,
       rotation: 0,
+      width: 240,
+      height: 160,
     })
 
     setContent("")
@@ -94,7 +96,7 @@ export function NoteForm({ onSubmit, onClose, colors }: NoteFormProps) {
                   key={color.value}
                   type="button"
                   onClick={() => setSelectedColor(color.value)}
-                  className="h-6 w-6 rounded-full border-2 flex items-center justify-center transition-all hover:scale-110"
+                  className="h-6 w-6 rounded-none border-2 flex items-center justify-center transition-all hover:scale-110"
                   style={{
                     backgroundColor: color.value,
                     borderColor: selectedColor === color.value 
