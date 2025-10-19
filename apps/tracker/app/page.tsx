@@ -56,6 +56,14 @@ export default function SubscriptionTracker() {
   const [hasInitialized, setHasInitialized] = useState(false)
   const [currentMonth, setCurrentMonth] = useState<string>(() => getCurrentMonthString())
 
+  // Focus mode state
+  const [isFocusMode, setIsFocusMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('focusMode') === 'true'
+    }
+    return false
+  })
+
   // Initialize from localStorage or default to empty array
   const [checkedBoxes, setCheckedBoxes] = useState<Set<number>>(() => {
     if (typeof window !== "undefined") {
@@ -69,6 +77,23 @@ export default function SubscriptionTracker() {
   const syncLocalSubscriptions = useMutation(api.subscriptions.syncLocalSubscriptions as any)
   const updateSubscription = useMutation(api.subscriptions.updateSubscription as any)
   const batchUpdateSubscriptions = useMutation(api.subscriptions.batchUpdateSubscriptions as any)
+
+  // Focus mode persistence
+  useEffect(() => {
+    localStorage.setItem('focusMode', isFocusMode.toString())
+  }, [isFocusMode])
+
+  // Focus mode keyboard shortcut
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setIsFocusMode(prev => !prev)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   // Initialize sync when user logs in
   useEffect(() => {
@@ -201,25 +226,31 @@ export default function SubscriptionTracker() {
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight text-balance font-mono">{formatMonthDisplay(currentMonth)}</h1>
           </div>
-          <div className="flex items-center gap-2">
-            {session?.user ? (
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-sm text-muted-foreground">{session.user.email}</span>
-                <button
-                  onClick={() => authClient.signOut()}
-                  className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm"
-                >
-                  Sign out
-                </button>
-              </div>
-            ) : (
-              <SignInDialog>
-                <button className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm">
-                  Sign in
-                </button>
-              </SignInDialog>
-            )}
-            <ThemeToggle />
+          <div 
+            className={`transition-transform duration-300 ease-in-out ${
+              isFocusMode ? '-translate-y-full' : 'translate-y-0'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {session?.user ? (
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm text-muted-foreground">{session.user.email}</span>
+                  <button
+                    onClick={() => authClient.signOut()}
+                    className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              ) : (
+                <SignInDialog>
+                  <button className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm">
+                    Sign in
+                  </button>
+                </SignInDialog>
+              )}
+              <ThemeToggle />
+            </div>
           </div>
         </div>
 
@@ -365,7 +396,11 @@ export default function SubscriptionTracker() {
         </Card>
 
         {/* Sticky Bottom Navigation */}
-        <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-40">
+        <div 
+          className={`fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-40 transition-transform duration-300 ease-in-out ${
+            isFocusMode ? 'translate-y-full' : 'translate-y-0'
+          }`}
+        >
           <div className="mx-auto max-w-2xl">
             <div className="flex items-center justify-between gap-4">
               <Button
@@ -377,24 +412,6 @@ export default function SubscriptionTracker() {
                 <ChevronLeft className="h-4 w-4 mr-2" />
                 Previous month
               </Button>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={debugLocalStorage}
-                  className="font-mono text-xs"
-                >
-                  Debug
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={clearLocalSubscriptions}
-                  className="font-mono text-xs"
-                >
-                  Clear
-                </Button>
-              </div>
               <Button
                 variant="outline"
                 size="sm"

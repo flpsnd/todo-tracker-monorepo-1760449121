@@ -52,6 +52,14 @@ export default function Home() {
   const [isSelectMode, setIsSelectMode] = useState(false)
   const [isReconnecting, setIsReconnecting] = useState(false)
   const [deletedNotesQueue, setDeletedNotesQueue] = useState<Array<{note: Note, timeoutId: NodeJS.Timeout}>>([])
+
+  // Focus mode state
+  const [isFocusMode, setIsFocusMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('focusMode') === 'true'
+    }
+    return false
+  })
   
   const canvasRef = useRef<HTMLDivElement>(null)
   const lastPanRef = useRef({ x: 0, y: 0 })
@@ -61,6 +69,23 @@ export default function Home() {
   
   // Toast hook
   const { toast } = useToast()
+
+  // Focus mode persistence
+  useEffect(() => {
+    localStorage.setItem('focusMode', isFocusMode.toString())
+  }, [isFocusMode])
+
+  // Focus mode keyboard shortcut
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setIsFocusMode(prev => !prev)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
   
   // Convex queries and mutations (only available when Convex is configured)
   let convexNotes: any[] | undefined = undefined
@@ -498,7 +523,11 @@ export default function Home() {
     <ErrorBoundary>
       <main className="min-h-screen bg-background overflow-hidden relative">
       {/* Top bar */}
-      <div className="absolute top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-sm border-b border-border p-4">
+      <div 
+        className={`absolute top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-sm border-b border-border p-4 transition-transform duration-300 ease-in-out ${
+          isFocusMode ? '-translate-y-full' : 'translate-y-0'
+        }`}
+      >
         <div className="mx-auto max-w-2xl">
           <div className="flex items-center justify-between">
             <Button
@@ -549,8 +578,8 @@ export default function Home() {
         ref={canvasRef}
         className="absolute inset-0 cursor-grab active:cursor-grabbing overflow-hidden"
         style={{ 
-          top: '80px', // Account for top bar
-          height: 'calc(100vh - 80px)',
+          top: isFocusMode ? '0px' : '80px', // Account for top bar when not in focus mode
+          height: isFocusMode ? '100vh' : 'calc(100vh - 80px)',
         }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -596,7 +625,11 @@ export default function Home() {
 
 
       {/* Bottom controls */}
-      <div className="fixed bottom-4 left-0 right-0 z-40">
+      <div 
+        className={`fixed bottom-4 left-0 right-0 z-40 transition-transform duration-300 ease-in-out ${
+          isFocusMode ? 'translate-y-full' : 'translate-y-0'
+        }`}
+      >
         <div className="mx-auto max-w-2xl px-4">
           <div className="flex items-center justify-between">
             {/* Select mode controls */}

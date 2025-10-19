@@ -76,11 +76,36 @@ export default function Home() {
   const [deletedNotesQueue, setDeletedNotesQueue] = useState<Array<{note: Note, timeoutId: NodeJS.Timeout}>>([])
   const contentRef = useRef<HTMLDivElement>(null)
 
+  // Focus mode state
+  const [isFocusMode, setIsFocusMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('focusMode') === 'true'
+    }
+    return false
+  })
+
   // Auth state
   const { data: session } = authClient.useSession()
   
   // Toast hook
   const { toast } = useToast()
+
+  // Focus mode persistence
+  useEffect(() => {
+    localStorage.setItem('focusMode', isFocusMode.toString())
+  }, [isFocusMode])
+
+  // Focus mode keyboard shortcut
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setIsFocusMode(prev => !prev)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   // Initialize app with local-first logic
   useEffect(() => {
@@ -330,7 +355,13 @@ export default function Home() {
                 placeholder="Add title"
               />
             </div>
-            <ThemeToggle />
+            <div 
+              className={`transition-transform duration-300 ease-in-out ${
+                isFocusMode ? '-translate-y-full' : 'translate-y-0'
+              }`}
+            >
+              <ThemeToggle />
+            </div>
           </div>
           
           {/* Content textarea */}
@@ -523,7 +554,11 @@ export default function Home() {
 
 
       {/* Sticky Bottom UI */}
-      <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-50">
+      <div 
+        className={`fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-50 transition-transform duration-300 ease-in-out ${
+          isFocusMode ? 'translate-y-full' : 'translate-y-0'
+        }`}
+      >
         <div className="mx-auto max-w-2xl">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
