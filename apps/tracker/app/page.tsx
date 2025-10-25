@@ -228,7 +228,7 @@ export default function SubscriptionTracker() {
           </div>
           <div 
             className={`transition-transform duration-300 ease-in-out ${
-              isFocusMode ? '-translate-y-full' : 'translate-y-0'
+              isFocusMode ? '-translate-y-[200%]' : 'translate-y-0'
             }`}
           >
             <div className="flex items-center gap-2">

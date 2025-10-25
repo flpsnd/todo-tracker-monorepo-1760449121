@@ -97,8 +97,14 @@ export function StickyNote({
 
     const target = e.target as HTMLElement
     
+    // Check for rotation handles
+    if (target.classList.contains('rotate-handle')) {
+      e.preventDefault()
+      setIsRotating(true)
+      setInitialRotation(note.rotation)
+    }
     // Check for resize handles
-    if (target.classList.contains('resize-handle')) {
+    else if (target.classList.contains('resize-handle')) {
       e.preventDefault()
       // Check if holding Alt/Option key for rotation
       if (e.altKey) {
@@ -195,7 +201,13 @@ export function StickyNote({
         const angleDifference = currentDegrees - initialDegrees
         const newRotation = initialRotation + angleDifference
         
-        onUpdate({ rotation: newRotation })
+        // Normalize rotation to 0-360 range
+        const normalizedRotation = ((newRotation % 360) + 360) % 360
+        
+        // Only update if the rotation has actually changed
+        if (Math.abs(normalizedRotation - note.rotation) > 0.1) {
+          onUpdate({ rotation: normalizedRotation })
+        }
       }
     }
   }
@@ -282,7 +294,13 @@ export function StickyNote({
             const angleDifference = currentDegrees - initialDegrees
             const newRotation = initialRotation + angleDifference
             
-            onUpdate({ rotation: newRotation })
+            // Normalize rotation to 0-360 range
+            const normalizedRotation = ((newRotation % 360) + 360) % 360
+            
+            // Only update if the rotation has actually changed
+            if (Math.abs(normalizedRotation - note.rotation) > 0.1) {
+              onUpdate({ rotation: normalizedRotation })
+            }
           }
         }
       }
@@ -363,8 +381,16 @@ export function StickyNote({
         color: note.color === '#000000' ? '#ffffff' : '#000000',
         borderColor: isSelected ? '#3b82f6' : 'rgba(0,0,0,0.1)',
         zIndex: isDragging || isRotating || isResizing ? 1000 : 10,
-        transform: `rotate(${note.rotation}deg)`,
         transformOrigin: 'center',
+      }}
+      animate={{
+        rotate: note.rotation,
+        scale: isHovered ? 1.02 : 1,
+      }}
+      transition={{
+        type: "spring",
+        stiffness: 300,
+        damping: 30
       }}
       onClick={handleClick}
       onMouseDown={handleMouseDown}
@@ -375,8 +401,6 @@ export function StickyNote({
       }}
       onDoubleClick={handleDoubleClick}
       onMouseEnter={() => setIsHovered(true)}
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
       drag={false} // We handle drag manually
     >
       {/* Color picker (appears when active) */}
@@ -426,16 +450,60 @@ export function StickyNote({
       {isActive && !isSelectMode && (
         <>
           {/* Corner resize handles */}
-          <div className="resize-handle absolute -top-1 -left-1 w-3 h-3 bg-background border border-border cursor-nw-resize hover:bg-accent transition-colors" data-handle="top-left" title="Resize (hold Alt to rotate)" />
-          <div className="resize-handle absolute -top-1 -right-1 w-3 h-3 bg-background border border-border cursor-ne-resize hover:bg-accent transition-colors" data-handle="top-right" title="Resize (hold Alt to rotate)" />
-          <div className="resize-handle absolute -bottom-1 -left-1 w-3 h-3 bg-background border border-border cursor-sw-resize hover:bg-accent transition-colors" data-handle="bottom-left" title="Resize (hold Alt to rotate)" />
-          <div className="resize-handle absolute -bottom-1 -right-1 w-3 h-3 bg-background border border-border cursor-se-resize hover:bg-accent transition-colors" data-handle="bottom-right" title="Resize (hold Alt to rotate)" />
+          <div className="resize-handle absolute -top-1 -left-1 w-3 h-3 bg-foreground border border-border cursor-nw-resize hover:bg-accent transition-colors" data-handle="top-left" title="Resize (hold Alt to rotate)" />
+          <div className="resize-handle absolute -top-1 -right-1 w-3 h-3 bg-foreground border border-border cursor-ne-resize hover:bg-accent transition-colors" data-handle="top-right" title="Resize (hold Alt to rotate)" />
+          <div className="resize-handle absolute -bottom-1 -left-1 w-3 h-3 bg-foreground border border-border cursor-sw-resize hover:bg-accent transition-colors" data-handle="bottom-left" title="Resize (hold Alt to rotate)" />
+          <div className="resize-handle absolute -bottom-1 -right-1 w-3 h-3 bg-foreground border border-border cursor-se-resize hover:bg-accent transition-colors" data-handle="bottom-right" title="Resize (hold Alt to rotate)" />
           
           {/* Side resize handles */}
-          <div className="resize-handle absolute -top-1 left-0 right-0 h-1 bg-background border-t border-border cursor-n-resize hover:bg-accent transition-colors" data-handle="top" title="Resize height" />
-          <div className="resize-handle absolute -bottom-1 left-0 right-0 h-1 bg-background border-b border-border cursor-s-resize hover:bg-accent transition-colors" data-handle="bottom" title="Resize height" />
-          <div className="resize-handle absolute -left-1 top-0 bottom-0 w-1 bg-background border-l border-border cursor-w-resize hover:bg-accent transition-colors" data-handle="left" title="Resize width" />
-          <div className="resize-handle absolute -right-1 top-0 bottom-0 w-1 bg-background border-r border-border cursor-e-resize hover:bg-accent transition-colors" data-handle="right" title="Resize width" />
+          <div className="resize-handle absolute -top-1 left-0 right-0 h-1 bg-foreground border-t border-border cursor-n-resize hover:bg-accent transition-colors" data-handle="top" title="Resize height" />
+          <div className="resize-handle absolute -bottom-1 left-0 right-0 h-1 bg-foreground border-b border-border cursor-s-resize hover:bg-accent transition-colors" data-handle="bottom" title="Resize height" />
+          <div className="resize-handle absolute -left-1 top-0 bottom-0 w-1 bg-foreground border-l border-border cursor-w-resize hover:bg-accent transition-colors" data-handle="left" title="Resize width" />
+          <div className="resize-handle absolute -right-1 top-0 bottom-0 w-1 bg-foreground border-r border-border cursor-e-resize hover:bg-accent transition-colors" data-handle="right" title="Resize width" />
+          
+          {/* Invisible larger hit areas for side handles */}
+          <div className="resize-handle absolute -top-1 left-0 right-0 h-5 cursor-n-resize" data-handle="top" style={{ background: 'transparent' }} />
+          <div className="resize-handle absolute -bottom-1 left-0 right-0 h-5 cursor-s-resize" data-handle="bottom" style={{ background: 'transparent' }} />
+          <div className="resize-handle absolute -left-1 top-0 bottom-0 w-5 cursor-w-resize" data-handle="left" style={{ background: 'transparent' }} />
+          <div className="resize-handle absolute -right-1 top-0 bottom-0 w-5 cursor-e-resize" data-handle="right" style={{ background: 'transparent' }} />
+          
+          {/* Rotation handles (green L-shaped, outside corners) */}
+          <div 
+            className="rotate-handle absolute -top-2 -left-2 w-6 h-6 cursor-grab hover:scale-110 transition-transform" 
+            data-handle="top-left"
+            style={{
+              background: 'linear-gradient(135deg, #22c55e 0%, #22c55e 50%, transparent 50%, transparent 100%)',
+              clipPath: 'polygon(0% 0%, 100% 0%, 100% 40%, 40% 40%, 40% 100%, 0% 100%)'
+            }}
+            title="Rotate (hold and drag)"
+          />
+          <div 
+            className="rotate-handle absolute -top-2 -right-2 w-6 h-6 cursor-grab hover:scale-110 transition-transform" 
+            data-handle="top-right"
+            style={{
+              background: 'linear-gradient(225deg, #22c55e 0%, #22c55e 50%, transparent 50%, transparent 100%)',
+              clipPath: 'polygon(0% 0%, 100% 0%, 100% 100%, 60% 100%, 60% 40%, 0% 40%)'
+            }}
+            title="Rotate (hold and drag)"
+          />
+          <div 
+            className="rotate-handle absolute -bottom-2 -left-2 w-6 h-6 cursor-grab hover:scale-110 transition-transform" 
+            data-handle="bottom-left"
+            style={{
+              background: 'linear-gradient(45deg, #22c55e 0%, #22c55e 50%, transparent 50%, transparent 100%)',
+              clipPath: 'polygon(0% 0%, 40% 0%, 40% 60%, 100% 60%, 100% 100%, 0% 100%)'
+            }}
+            title="Rotate (hold and drag)"
+          />
+          <div 
+            className="rotate-handle absolute -bottom-2 -right-2 w-6 h-6 cursor-grab hover:scale-110 transition-transform" 
+            data-handle="bottom-right"
+            style={{
+              background: 'linear-gradient(315deg, #22c55e 0%, #22c55e 50%, transparent 50%, transparent 100%)',
+              clipPath: 'polygon(60% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 60%, 60% 60%)'
+            }}
+            title="Rotate (hold and drag)"
+          />
           
         </>
       )}

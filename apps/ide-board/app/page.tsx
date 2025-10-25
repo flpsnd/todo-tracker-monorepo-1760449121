@@ -234,7 +234,7 @@ export default function Home() {
     if (session?.user && updateNoteMutation) {
       try {
         setSyncStatus("syncing")
-        const note = notes.find(n => n.id === noteId)
+        const note = updatedNotes.find(n => n.id === noteId)
         // Only sync if this is a Convex note (has _id field)
         if (note?._id) {
           await updateNoteMutation({
@@ -525,7 +525,7 @@ export default function Home() {
       {/* Top bar */}
       <div 
         className={`absolute top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-sm border-b border-border p-4 transition-transform duration-300 ease-in-out ${
-          isFocusMode ? '-translate-y-full' : 'translate-y-0'
+          isFocusMode ? '-translate-y-[200%]' : 'translate-y-0'
         }`}
       >
         <div className="mx-auto max-w-2xl">
@@ -577,10 +577,6 @@ export default function Home() {
       <div
         ref={canvasRef}
         className="absolute inset-0 cursor-grab active:cursor-grabbing overflow-hidden"
-        style={{ 
-          top: isFocusMode ? '0px' : '80px', // Account for top bar when not in focus mode
-          height: isFocusMode ? '100vh' : 'calc(100vh - 80px)',
-        }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -627,10 +623,10 @@ export default function Home() {
       {/* Bottom controls */}
       <div 
         className={`fixed bottom-4 left-0 right-0 z-40 transition-transform duration-300 ease-in-out ${
-          isFocusMode ? 'translate-y-full' : 'translate-y-0'
+          isFocusMode ? 'translate-y-[185%]' : 'translate-y-0'
         }`}
       >
-        <div className="mx-auto max-w-2xl px-4">
+        <div className="mx-auto max-w-2xl">
           <div className="flex items-center justify-between">
             {/* Select mode controls */}
             <div className="flex gap-2">

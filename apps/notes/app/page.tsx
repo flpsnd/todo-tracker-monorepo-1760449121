@@ -357,7 +357,7 @@ export default function Home() {
             </div>
             <div 
               className={`transition-transform duration-300 ease-in-out ${
-                isFocusMode ? '-translate-y-full' : 'translate-y-0'
+                isFocusMode ? '-translate-y-[200%]' : 'translate-y-0'
               }`}
             >
               <ThemeToggle />

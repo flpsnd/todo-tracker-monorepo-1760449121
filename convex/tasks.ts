@@ -4,14 +4,35 @@ import { authComponent } from "./auth";
 
 export const getTasks = query({
   args: {},
+  returns: v.array(v.object({
+    _id: v.id("tasks"),
+    _creationTime: v.number(),
+    title: v.string(),
+    description: v.string(),
+    color: v.string(),
+    section: v.string(),
+    completed: v.boolean(),
+    userId: v.id("user"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })),
   handler: async (ctx) => {
-    const user = await authComponent.getAuthUser(ctx);
-    if (!user) return [];
+    try {
+      // Get authenticated user
+      const user = await authComponent.getAuthUser(ctx);
 
-    return await ctx.db
-      .query("tasks")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .collect();
+      if (!user) {
+        return [];
+      }
+
+      return await ctx.db
+        .query("tasks")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .collect();
+    } catch (error) {
+      // If not authenticated, return empty array
+      return [];
+    }
   },
 });
 
@@ -24,8 +45,12 @@ export const addTask = mutation({
     completed: v.boolean(),
   },
   handler: async (ctx, args) => {
+    // Get authenticated user
     const user = await authComponent.getAuthUser(ctx);
-    if (!user) throw new Error("Not authenticated");
+
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
 
     const now = Date.now();
     return await ctx.db.insert("tasks", {
@@ -47,8 +72,12 @@ export const updateTask = mutation({
     completed: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    // Get authenticated user
     const user = await authComponent.getAuthUser(ctx);
-    if (!user) throw new Error("Not authenticated");
+
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
 
     const { taskId, ...updates } = args;
     const now = Date.now();
@@ -65,8 +94,12 @@ export const deleteTask = mutation({
     taskId: v.id("tasks"),
   },
   handler: async (ctx, args) => {
+    // Get authenticated user
     const user = await authComponent.getAuthUser(ctx);
-    if (!user) throw new Error("Not authenticated");
+
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
 
     return await ctx.db.delete(args.taskId);
   },
@@ -83,8 +116,12 @@ export const syncLocalTasks = mutation({
     })),
   },
   handler: async (ctx, args) => {
+    // Get authenticated user
     const user = await authComponent.getAuthUser(ctx);
-    if (!user) throw new Error("Not authenticated");
+
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
 
     const now = Date.now();
     const taskIds = [];

@@ -59,7 +59,7 @@ export function ColorPicker({
             >
               <div
                 className={cn(
-                  "h-6 w-6 rounded-full border-2 flex items-center justify-center transition-all hover:scale-110",
+                  "h-6 w-6 rounded-md border-2 flex items-center justify-center transition-all hover:scale-110",
                   currentColor === color.value ? "border-black" : "border-gray-300 dark:border-gray-600"
                 )}
                 style={{

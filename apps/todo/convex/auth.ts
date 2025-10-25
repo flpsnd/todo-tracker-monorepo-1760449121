@@ -8,7 +8,8 @@ import { betterAuth, BetterAuthOptions } from "better-auth";
 import { requireActionCtx } from "@convex-dev/better-auth/utils";
 import { DataModel } from "./_generated/dataModel";
 
-const siteUrl = process.env.SITE_URL || "http://localhost:3000";
+const siteUrl =
+  process.env.TODO_SITE_URL || process.env.SITE_URL || "http://localhost:3000";
 
 export const authComponent = createClient<DataModel, typeof authSchema>(
   components.betterAuth,

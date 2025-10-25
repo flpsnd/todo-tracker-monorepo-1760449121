@@ -1,6 +1,5 @@
 import { components, internal } from "./_generated/api";
 import { query, QueryCtx } from "./_generated/server";
-import authSchema from "./betterAuth/schema";
 import { createClient, GenericCtx } from "@convex-dev/better-auth";
 import { convex } from "@convex-dev/better-auth/plugins";
 import { magicLink } from "better-auth/plugins";
@@ -8,17 +7,10 @@ import { betterAuth, BetterAuthOptions } from "better-auth";
 import { requireActionCtx } from "@convex-dev/better-auth/utils";
 import { DataModel } from "./_generated/dataModel";
 
-const siteUrl = process.env.SITE_URL || "http://localhost:3000";
+// Use SITE_URL from Convex environment (your app URL)
+const siteUrl = process.env.SITE_URL || process.env.TODO_SITE_URL || "http://localhost:3000";
 
-export const authComponent = createClient<DataModel, typeof authSchema>(
-  components.betterAuth,
-  {
-    local: {
-      schema: authSchema,
-    },
-    verbose: false,
-  },
-);
+export const authComponent = createClient<DataModel>(components.betterAuth);
 
 export const createAuth = (
   ctx: GenericCtx<DataModel>,
@@ -35,12 +27,21 @@ export const createAuth = (
     emailAndPassword: {
       enabled: false,
     },
-    // Add session configuration
+    // Session configuration for Better Auth
     session: {
       expiresIn: 60 * 60 * 24 * 7, // 7 days
       updateAge: 60 * 60 * 24, // 1 day
     },
+    // CRITICAL: Enable cross-subdomain SSO using the official flag
+    advanced: {
+      crossSubDomainCookies: {
+        enabled: true,
+      },
+    },
     plugins: [
+      // REQUIRED: Convex plugin for compatibility
+      convex(),
+      // Your magic link plugin
       magicLink({
         sendMagicLink: async ({ email, url }: { email: string; url: string }) => {
           await requireActionCtx(ctx).runAction(internal.email.sendMagicLink, {
@@ -49,7 +50,6 @@ export const createAuth = (
           });
         },
       }),
-      convex(),
     ],
   } satisfies BetterAuthOptions);
 

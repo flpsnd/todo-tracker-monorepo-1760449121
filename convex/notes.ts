@@ -12,7 +12,7 @@ export const getNotes = query({
     x: v.number(),
     y: v.number(),
     rotation: v.number(),
-    userId: v.id("user"),
+    userId: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),
   })),

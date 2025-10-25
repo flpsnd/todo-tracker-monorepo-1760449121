@@ -3,6 +3,6 @@
     "CONVEX_DEPLOYMENT": "prod:next-herring-619",
     "NEXT_PUBLIC_CONVEX_URL": "https://next-herring-619.convex.cloud",
     "NEXT_PUBLIC_CONVEX_SITE_URL": "https://next-herring-619.convex.site",
-    "NEXT_PUBLIC_APP_URL": "https://todo-hc4wzyn95-flpsnds-projects.vercel.app"
+    "NEXT_PUBLIC_APP_URL": "https://tasks.caalm.app"
   }
 }

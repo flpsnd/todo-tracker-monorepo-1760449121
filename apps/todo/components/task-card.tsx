@@ -2,6 +2,7 @@
 
 import { Reorder, useMotionValue } from "framer-motion"
 import { useEffect, useRef, useState, useCallback } from "react"
+import { Trash2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { CustomCheckbox } from "@/components/ui/custom-checkbox"
@@ -40,6 +41,21 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
   // Throttle drag detection to improve performance
   const lastDetectionTime = useRef(0)
   const THROTTLE_MS = 16 // ~60fps
+  
+  // Auto-scroll when dragging near edges
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const isScrolling = useRef(false)
+  
+  // Track drag start position to prevent accidental drops
+  const dragStartPosition = useRef<{ x: number; y: number } | null>(null)
+  const hasDraggedEnough = useRef(false)
+  
+  // Track auto-scroll state to prevent section detection conflicts
+  const isAutoScrolling = useRef(false)
+  
+  // Scroll configuration
+  const SCROLL_THRESHOLD = 120 // pixels from edge to trigger scroll
+  const SCROLL_AMOUNT = 70 // pixels to scroll per trigger
 
   // Start editing a field
   const startEditing = (field: 'title' | 'description') => {
@@ -87,69 +103,132 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
     // Update cache when component mounts
     updateSectionsCache()
     
-    const unsubscribe = y.on("change", (latest) => {
-      if (!cardRef.current) return
+      const unsubscribe = y.on("change", (latest) => {
+        // Update cache on every drag movement to catch newly rendered sections
+        updateSectionsCache()
+        if (!cardRef.current) return
 
-      // Throttle the detection to improve performance
-      const now = Date.now()
-      if (now - lastDetectionTime.current < THROTTLE_MS) return
-      lastDetectionTime.current = now
-
-      const cardRect = cardRef.current.getBoundingClientRect()
-      const sections = sectionsCache.current
-
-      // Find which section the card is currently over
-      let targetSection = null
-      for (const sectionEl of sections) {
-        const sectionRect = sectionEl.getBoundingClientRect()
-        const sectionKey = sectionEl.getAttribute("data-section")
-
-        // Check if card center is within section bounds
-        const cardCenterY = cardRect.top + cardRect.height / 2
-        if (cardCenterY >= sectionRect.top && cardCenterY <= sectionRect.bottom && sectionKey) {
-          targetSection = sectionKey
-          break // Found the target, no need to continue
+        // Check if user has dragged enough distance (minimum 20px)
+        if (dragStartPosition.current) {
+          const currentY = latest
+          const dragDistance = Math.abs(currentY - dragStartPosition.current.y)
+          if (dragDistance > 20) {
+            hasDraggedEnough.current = true
+          }
         }
-      }
+
+        // Throttle the detection to improve performance
+        const now = Date.now()
+        if (now - lastDetectionTime.current < THROTTLE_MS) return
+        lastDetectionTime.current = now
+
+        const cardRect = cardRef.current.getBoundingClientRect()
+        const sections = sectionsCache.current
+
+
+      // Auto-scroll when dragging near top or bottom of viewport
+      const viewportHeight = window.innerHeight
+      const cardTop = cardRect.top
+      const cardBottom = cardRect.bottom
       
-      // Store the target section for drop
-      if (targetSection) {
-        cardRef.current?.setAttribute("data-target-section", targetSection)
+      // Determine if we should scroll
+      const shouldScrollUp = cardTop < SCROLL_THRESHOLD
+      const shouldScrollDown = cardBottom > viewportHeight - SCROLL_THRESHOLD
+      
+      if (shouldScrollUp || shouldScrollDown) {
+        // Set auto-scroll flag to prevent section detection during scroll
+        isAutoScrolling.current = true
+        
+        // Clear any existing timeout to prevent conflicts
+        if (scrollTimeoutRef.current) {
+          clearTimeout(scrollTimeoutRef.current)
+        }
+        
+        // Execute scroll immediately (no setTimeout wrapper)
+        const scrollDirection = shouldScrollUp ? -1 : 1
+        window.scrollBy({
+          top: scrollDirection * SCROLL_AMOUNT,
+          behavior: 'auto' // Use auto instead of smooth for better mobile performance
+        })
+        
+        // Reset auto-scroll flag after a minimal delay to allow scroll to process
+        scrollTimeoutRef.current = setTimeout(() => {
+          isAutoScrolling.current = false
+        }, 50) // 50ms is enough for the scroll to be processed
+      } else {
+        // Not in scroll zone - clear any pending scroll operations
+        if (scrollTimeoutRef.current) {
+          clearTimeout(scrollTimeoutRef.current)
+          scrollTimeoutRef.current = null
+        }
+        isAutoScrolling.current = false
+      }
+
+      // Skip section detection during auto-scroll to prevent conflicts
+      if (!isAutoScrolling.current) {
+        // Find which section the card is currently over
+        let targetSection = null
+        for (const sectionEl of sections) {
+          const sectionRect = sectionEl.getBoundingClientRect()
+          const sectionKey = sectionEl.getAttribute("data-section")
+
+          // Check if card center is within section bounds
+          const cardCenterY = cardRect.top + cardRect.height / 2
+          if (cardCenterY >= sectionRect.top && cardCenterY <= sectionRect.bottom && sectionKey) {
+            targetSection = sectionKey
+            break // Found the target, no need to continue
+          }
+        }
+        
+        // Store the target section for drop
+        if (targetSection) {
+          cardRef.current?.setAttribute("data-target-section", targetSection)
+        }
       }
     })
 
-    return () => unsubscribe()
+    return () => {
+      unsubscribe()
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current)
+      }
+    }
   }, [y, updateSectionsCache])
 
   return (
     <Reorder.Item
       ref={cardRef}
       value={task}
-      onDragStart={isSelectMode ? undefined : onDragStart}
-      onDragEnd={isSelectMode ? undefined : () => {
-        onDragEnd()
-
-        // Check if dropped over delete zone
-        const deleteButton = document.querySelector('[data-delete-button]')
-        if (deleteButton) {
-          const deleteButtonRect = deleteButton.getBoundingClientRect()
-          const cardRect = cardRef.current?.getBoundingClientRect()
-          
-          if (cardRect && 
-              cardRect.left < deleteButtonRect.right &&
-              cardRect.right > deleteButtonRect.left &&
-              cardRect.top < deleteButtonRect.bottom &&
-              cardRect.bottom > deleteButtonRect.top) {
-            onDelete(task.id)
-            return
-          }
-        }
-
-        const targetSection = cardRef.current?.getAttribute("data-target-section")
-        if (targetSection && targetSection !== task.section) {
-          onMoveToSection(task.id, targetSection)
-        }
+      onDragStart={isSelectMode ? undefined : (event, info) => {
+        dragStartPosition.current = { x: info.point.x, y: info.point.y }
+        hasDraggedEnough.current = false
+        onDragStart()
       }}
+        onDragEnd={isSelectMode ? undefined : () => {
+          // Clear any pending scroll timeout
+          if (scrollTimeoutRef.current) {
+            clearTimeout(scrollTimeoutRef.current)
+            scrollTimeoutRef.current = null
+          }
+          
+          // Reset auto-scroll flags
+          isAutoScrolling.current = false
+          isScrolling.current = false
+          
+          onDragEnd()
+
+          // Only allow drops if user has dragged enough distance
+          if (hasDraggedEnough.current) {
+            const targetSection = cardRef.current?.getAttribute("data-target-section")
+            if (targetSection && targetSection !== task.section) {
+              onMoveToSection(task.id, targetSection)
+            }
+          }
+          
+          // Reset drag tracking
+          dragStartPosition.current = null
+          hasDraggedEnough.current = false
+        }}
       style={{ y }}
       className={isSelectMode ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}
       whileDrag={isSelectMode ? {} : {
@@ -209,7 +288,7 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
                 </h3>
                 {!isSelectMode && (
                   <div 
-                    className={`transition-all duration-200 ease-in-out overflow-hidden ${
+                    className={`transition-all duration-200 ease-in-out overflow-hidden flex items-center gap-2 ${
                       (isHovered || isColorPickerOpen)
                         ? "max-h-6 opacity-100" 
                         : "max-h-0 opacity-0"
@@ -222,6 +301,15 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
                       side="bottom"
                       className="h-5 w-5"
                     />
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onDelete(task.id)
+                      }}
+                      className="h-5 w-5 flex items-center justify-center hover:bg-black/10 rounded transition-colors"
+                    >
+                      <Trash2 className="h-4 w-4 text-black" />
+                    </button>
                   </div>
                 )}
               </div>

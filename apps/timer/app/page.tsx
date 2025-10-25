@@ -243,44 +243,41 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-background flex flex-col">
-      {/* Main timer area */}
-      <div className="flex-1 flex flex-col justify-center">
-        <div className="max-w-2xl mx-auto px-4 w-full">
-          <div className="space-y-6">
-            {/* Timer name input with theme toggle */}
-            <div className="flex items-center justify-between">
-              <div className="relative flex-1">
-                <Input
-                  value={timerName}
-                  onChange={(e) => setTimerName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      // Focus could go to timer display if needed
-                    }
-                  }}
-                  className="font-mono text-2xl font-bold tracking-tight text-balance border-none bg-transparent px-0 focus-visible:ring-0 placeholder:text-muted-foreground"
-                  placeholder="Add title..."
-                />
-              </div>
-              <div 
-                className={`transition-transform duration-300 ease-in-out ${
-                  isFocusMode ? '-translate-y-full' : 'translate-y-0'
-                }`}
-              >
-                <ThemeToggle />
-              </div>
-            </div>
-            
-            {/* Timer display */}
-            <div className="flex justify-center">
-              <TimerDisplay
-                timeRemaining={timeRemaining}
-                onTimeChange={handleTimeChange}
-                isRunning={isRunning}
-              />
-            </div>
+      {/* Header */}
+      <div className="max-w-2xl mx-auto w-full px-4 pt-12 pb-8">
+        <div className="flex items-center justify-between">
+          <div className="relative flex-1">
+            <Input
+              value={timerName}
+              onChange={(e) => setTimerName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  // Focus could go to timer display if needed
+                }
+              }}
+              className="font-mono text-2xl font-bold tracking-tight text-balance border-none bg-transparent px-0 focus-visible:ring-0 placeholder:text-muted-foreground"
+              placeholder="Add title..."
+            />
           </div>
+          <div 
+            className={`transition-transform duration-300 ease-in-out ${
+              isFocusMode ? '-translate-y-[200%]' : 'translate-y-0'
+            }`}
+          >
+            <ThemeToggle />
+          </div>
+        </div>
+      </div>
+
+      {/* Timer display */}
+      <div className="flex-1 flex items-center justify-center min-h-0">
+        <div className="max-w-2xl mx-auto w-full px-4">
+          <TimerDisplay
+            timeRemaining={timeRemaining}
+            onTimeChange={handleTimeChange}
+            isRunning={isRunning}
+          />
         </div>
       </div>
 

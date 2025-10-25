@@ -84,6 +84,7 @@ export function TaskSection({
     
     if (!isDragging) return 0 // Hide sections when not dragging
     
+    // When dragging, show all sections with at least some opacity for drop detection
     const currentDay = getDayNumber(section)
     const originalDay = draggingTaskSection ? getDayNumber(draggingTaskSection) : -1
     const hoveredDay = hoveredSection ? getDayNumber(hoveredSection) : -1
@@ -100,8 +101,8 @@ export function TaskSection({
       }
     }
     
-    // Fallback to original behavior for edge cases
-    return isHovered && !isCurrentSection ? 0.5 : 0
+    // When dragging, show all sections with at least 0.3 opacity for drop detection
+    return 0.3
   }, [shouldShow, isDragging, section, draggingTaskSection, hoveredSection, isHovered, isCurrentSection, getDayNumber])
 
   // Cleanup timeout on unmount

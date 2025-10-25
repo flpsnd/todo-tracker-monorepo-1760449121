@@ -9,11 +9,22 @@ export interface DeletedTask {
   timeoutId?: number;
 }
 
+type PlainTask = Omit<Task, "_id"> & { _id?: string };
+
+function rebuildTask(task: PlainTask): Task {
+  return {
+    ...task,
+    id: task.id,
+    _id: task._id,
+  };
+}
+
 export function loadLocalTasks(): Task[] {
   if (typeof window === "undefined") return [];
   try {
     const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
+    const parsed: PlainTask[] = data ? JSON.parse(data) : [];
+    return parsed.map(rebuildTask);
   } catch (error) {
     console.error("Failed to load local tasks:", error);
     return [];
@@ -23,7 +34,11 @@ export function loadLocalTasks(): Task[] {
 export function saveLocalTasks(tasks: Task[]): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+    const plain: PlainTask[] = tasks.map((task) => ({
+      ...task,
+      _id: task._id,
+    }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(plain));
   } catch (error) {
     console.error("Failed to save local tasks:", error);
   }
@@ -36,6 +51,20 @@ export function clearLocalTasks(): void {
   } catch (error) {
     console.error("Failed to clear local tasks:", error);
   }
+}
+
+export function replaceTaskIds(tasks: Task[], replacements: Record<string, string>): Task[] {
+  const updated = tasks.map((task) => {
+    const newId = replacements[task.id];
+    if (!newId) return task;
+    return {
+      ...task,
+      id: newId,
+      _id: newId,
+    };
+  });
+  saveLocalTasks(updated);
+  return updated;
 }
 
 export function getDeletedTasks(): DeletedTask[] {

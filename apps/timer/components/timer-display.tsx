@@ -1,7 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
-import { formatTime } from "@/lib/local-storage"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 
 interface TimerDisplayProps {
@@ -11,254 +10,202 @@ interface TimerDisplayProps {
 }
 
 export function TimerDisplay({ timeRemaining, onTimeChange, isRunning }: TimerDisplayProps) {
-  const [isEditing, setIsEditing] = useState(false)
   const [timeFormat, setTimeFormat] = useState<'HH:MM' | 'MM:SS'>('MM:SS')
-  const [editingDigit, setEditingDigit] = useState(0)
-  
-  // Character-by-character input states
-  const [digit0, setDigit0] = useState("")
-  const [digit1, setDigit1] = useState("")
-  const [digit2, setDigit2] = useState("")
-  const [digit3, setDigit3] = useState("")
-  const inputRefs = [
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null)
-  ]
+  const [activeIndex, setActiveIndex] = useState<number | null>(null)
 
-  // Initialize digits when editing starts
+  const inputRefs = useRef<Array<HTMLInputElement | null>>([])
+  if (inputRefs.current.length !== 4) {
+    inputRefs.current = new Array(4).fill(null)
+  }
+
+  // Keep format in sync with time remaining when not editing
   useEffect(() => {
-    if (isEditing) {
-      const time = formatTime(timeRemaining)
-      const [left, right] = time.split(':')
-      setDigit0(left[0] || '')
-      setDigit1(left[1] || '')
-      setDigit2(right[0] || '')
-      setDigit3(right[1] || '')
-      
-      // Set format based on current time
+    if (activeIndex === null) {
       const totalSeconds = Math.floor(timeRemaining / 1000)
       const hours = Math.floor(totalSeconds / 3600)
       setTimeFormat(hours > 0 ? 'HH:MM' : 'MM:SS')
-      
-      // Focus the first digit
-      setTimeout(() => {
-        inputRefs[0].current?.focus()
-      }, 0)
     }
-  }, [isEditing, timeRemaining])
+  }, [timeRemaining, activeIndex])
 
-  // Helper function to get current digit value
-  const getDigitValue = (index: number): string => {
-    switch(index) {
-      case 0: return digit0
-      case 1: return digit1
-      case 2: return digit2
-      case 3: return digit3
-      default: return ''
+  const digits = useMemo(() => {
+    const totalSeconds = Math.max(0, Math.floor(timeRemaining / 1000))
+    if (timeFormat === 'HH:MM') {
+      const hours = Math.floor(totalSeconds / 3600)
+      const minutes = Math.floor((totalSeconds % 3600) / 60)
+      return [
+        Math.floor(hours / 10).toString(),
+        (hours % 10).toString(),
+        Math.floor(minutes / 10).toString(),
+        (minutes % 10).toString(),
+      ]
+    }
+
+    const minutes = Math.floor(totalSeconds / 60)
+    const seconds = totalSeconds % 60
+    return [
+      Math.floor(minutes / 10).toString(),
+      (minutes % 10).toString(),
+      Math.floor(seconds / 10).toString(),
+      (seconds % 10).toString(),
+    ]
+  }, [timeRemaining, timeFormat])
+
+  const handleDigitFocus = (index: number) => {
+    if (isRunning) return
+    setActiveIndex(index)
+    setTimeout(() => {
+      inputRefs.current[index]?.focus()
+      inputRefs.current[index]?.select()
+    }, 0)
+  }
+
+  const handleDigitInput = (index: number, digit: string) => {
+    const newDigits = [...digits]
+    newDigits[index] = digit
+    commitNewTime(newDigits)
+
+    if (index < 3) {
+      handleDigitFocus(index + 1)
+    } else {
+      setActiveIndex(null)
     }
   }
 
-  // Handle individual digit input with auto-advance
-  const handleDigitChange = (index: number, value: string) => {
-    if (!/^\d*$/.test(value)) return // Only allow digits
-    
-    const newValue = value.slice(-1) // Take only last character
-    
-    // Update the appropriate digit state
-    switch(index) {
-      case 0: setDigit0(newValue); break
-      case 1: setDigit1(newValue); break
-      case 2: setDigit2(newValue); break
-      case 3: setDigit3(newValue); break
-    }
-    
-    // Auto-advance to next input if digit entered
-    if (newValue && index < 3) {
-      setTimeout(() => {
-        inputRefs[index + 1].current?.focus()
-      }, 0)
-    }
-  }
+  const commitNewTime = (updatedDigits: string[]) => {
+    const leftPair = updatedDigits.slice(0, 2).join('')
+    const rightPair = updatedDigits.slice(2).join('')
 
-  // Handle backspace to go to previous input
-  const handleDigitKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Backspace' && !getDigitValue(index) && index > 0) {
-      inputRefs[index - 1].current?.focus()
-    } else if (e.key === 'Enter') {
-      e.preventDefault()
-      handleSubmit()
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      setIsEditing(false)
-      resetDigits()
-    }
-  }
-
-  const handleDigitClick = (index: number) => {
-    if (!isRunning) {
-      setIsEditing(true)
-      setEditingDigit(index)
-    }
-  }
-
-  const handleSubmit = () => {
-    // Construct time from digit states
-    const leftPair = digit0 + digit1
-    const rightPair = digit2 + digit3
-    
     let newTime: number | null = null
-    
+
     if (timeFormat === 'HH:MM') {
       const hours = parseInt(leftPair, 10)
       const minutes = parseInt(rightPair, 10)
-      if (hours >= 0 && hours <= 99 && minutes >= 0 && minutes <= 59) {
+      if (!Number.isNaN(hours) && !Number.isNaN(minutes) &&
+          hours >= 0 && hours <= 99 && minutes >= 0 && minutes <= 59) {
         newTime = hours * 3600000 + minutes * 60000
       }
     } else {
       const minutes = parseInt(leftPair, 10)
       const seconds = parseInt(rightPair, 10)
-      if (minutes >= 0 && minutes <= 99 && seconds >= 0 && seconds <= 59) {
+      if (!Number.isNaN(minutes) && !Number.isNaN(seconds) &&
+          minutes >= 0 && minutes <= 99 && seconds >= 0 && seconds <= 59) {
         newTime = minutes * 60000 + seconds * 1000
       }
     }
-    
+
     if (newTime !== null && newTime > 0) {
       onTimeChange(newTime)
     }
-    setIsEditing(false)
-    resetDigits()
   }
 
-  const resetDigits = () => {
-    setDigit0("")
-    setDigit1("")
-    setDigit2("")
-    setDigit3("")
-  }
+  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (/^\d$/.test(e.key)) {
+      e.preventDefault()
+      handleDigitInput(index, e.key)
+      return
+    }
 
-  const handleBlur = () => {
-    // Only submit if all inputs have lost focus
-    setTimeout(() => {
-      if (!inputRefs.some(ref => ref.current === document.activeElement)) {
-        handleSubmit()
+    if (e.key === 'ArrowLeft' && index > 0) {
+      e.preventDefault()
+      handleDigitFocus(index - 1)
+    }
+    if (e.key === 'ArrowRight' && index < 3) {
+      e.preventDefault()
+      handleDigitFocus(index + 1)
+    }
+    if (e.key === 'Backspace') {
+      e.preventDefault()
+      if (digits[index] !== '0') {
+        handleDigitInput(index, '0')
+      } else if (index > 0) {
+        handleDigitInput(index - 1, '0')
+        handleDigitFocus(index - 1)
       }
-    }, 100)
+      return
+    }
+    if (e.key === 'Enter') {
+      setActiveIndex(null)
+    }
+    if (e.key === 'Escape') {
+      setActiveIndex(null)
+    }
   }
 
-  const renderTimeDigits = (timeString: string) => {
-    const [left, right] = timeString.split(':')
-    const leftDigits = left.split('')
-    const rightDigits = right.split('')
-    
-    return (
-      <div className="flex items-center justify-center gap-5 w-full max-w-2xl">
-        {/* Left pair */}
-        <div className="flex items-center gap-1 flex-1">
-          {leftDigits.map((digit, index) => (
-            <div 
-              key={index} 
-              className="bg-card border border-border rounded-lg p-8 flex-1 h-28 flex items-center justify-center shadow-sm cursor-pointer hover:bg-accent/50 transition-colors"
-              onClick={() => handleDigitClick(index)}
-            >
-              <span 
-                className="font-mono text-8xl font-bold text-foreground"
-                style={{ fontSize: 'clamp(3rem, 12vw, 6rem)' }}
-              >
-                {digit}
-              </span>
-            </div>
-          ))}
-        </div>
-        {/* Right pair */}
-        <div className="flex items-center gap-1 flex-1">
-          {rightDigits.map((digit, index) => (
-            <div 
-              key={`right-${index}`} 
-              className="bg-card border border-border rounded-lg p-8 flex-1 h-28 flex items-center justify-center shadow-sm cursor-pointer hover:bg-accent/50 transition-colors"
-              onClick={() => handleDigitClick(index + 2)}
-            >
-              <span 
-                className="font-mono text-8xl font-bold text-foreground"
-                style={{ fontSize: 'clamp(3rem, 12vw, 6rem)' }}
-              >
-                {digit}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    )
+  const handleBlur = (index: number) => {
+    setTimeout(() => {
+      const isAnyFocused = inputRefs.current.some((ref) => ref === document.activeElement)
+      if (!isAnyFocused) {
+        setActiveIndex(null)
+      }
+    }, 0)
   }
 
-  const renderEditingDigits = () => {
+  const handleFormatChange = (format: 'HH:MM' | 'MM:SS') => {
+    setTimeFormat(format)
+    // Don't close edit mode when changing format
+  }
+
+  const renderDigit = (digit: string, index: number) => {
+    const isActive = activeIndex === index
     return (
-      <div className="w-full flex flex-col items-center gap-4 max-w-2xl">
-        {/* Format selector */}
-        <div className="flex gap-2">
-          <Button
-            variant={timeFormat === 'MM:SS' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setTimeFormat('MM:SS')}
-            className="font-mono"
+      <div
+        key={index}
+        className={`relative flex-1 h-28 cursor-pointer transition-colors ${
+          isActive ? 'ring-2 ring-primary' : 'ring-0'
+        }`}
+        onClick={() => handleDigitFocus(index)}
+      >
+        <div className="bg-card border border-border rounded-lg p-8 flex h-full items-center justify-center shadow-sm">
+          <span
+            className="font-mono text-8xl font-bold text-foreground"
+            style={{ fontSize: 'clamp(3rem, 12vw, 6rem)' }}
           >
-            MM:SS
-          </Button>
-          <Button
-            variant={timeFormat === 'HH:MM' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setTimeFormat('HH:MM')}
-            className="font-mono"
-          >
-            HH:MM
-          </Button>
+            {digit}
+          </span>
         </div>
-        
-        {/* Character-by-character input */}
-        <div className="flex items-center justify-center gap-5 w-full">
-          <div className="flex items-center gap-1 flex-1">
-            {[0, 1].map(i => (
-              <input
-                key={i}
-                ref={inputRefs[i]}
-                type="text"
-                inputMode="numeric"
-                maxLength={1}
-                value={getDigitValue(i)}
-                onChange={(e) => handleDigitChange(i, e.target.value)}
-                onKeyDown={(e) => handleDigitKeyDown(i, e)}
-                onBlur={handleBlur}
-                className="bg-card border-2 border-primary rounded-lg p-8 flex-1 h-28 text-center font-mono text-8xl font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                style={{ fontSize: 'clamp(3rem, 12vw, 6rem)' }}
-              />
-            ))}
-          </div>
-          <div className="flex items-center gap-1 flex-1">
-            {[2, 3].map(i => (
-              <input
-                key={i}
-                ref={inputRefs[i]}
-                type="text"
-                inputMode="numeric"
-                maxLength={1}
-                value={getDigitValue(i)}
-                onChange={(e) => handleDigitChange(i, e.target.value)}
-                onKeyDown={(e) => handleDigitKeyDown(i, e)}
-                onBlur={handleBlur}
-                className="bg-card border-2 border-primary rounded-lg p-8 flex-1 h-28 text-center font-mono text-8xl font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                style={{ fontSize: 'clamp(3rem, 12vw, 6rem)' }}
-              />
-            ))}
-          </div>
-        </div>
+        <input
+          ref={(el) => {
+            inputRefs.current[index] = el
+          }}
+          type="text"
+          inputMode="numeric"
+          maxLength={1}
+          className="absolute inset-0 h-full w-full opacity-0 caret-transparent"
+          defaultValue={digits[index]}
+          onKeyDown={(e) => handleKeyDown(index, e)}
+          onBlur={() => handleBlur(index)}
+        />
       </div>
     )
   }
 
   return (
-    <div className="w-full flex justify-center">
-      {isEditing ? renderEditingDigits() : renderTimeDigits(formatTime(timeRemaining))}
+    <div className="flex flex-col items-center gap-6 w-full">
+      {/* Format selector - always rendered to prevent layout shift */}
+      <div className="flex gap-2 h-8">
+        <Button
+          variant={timeFormat === 'MM:SS' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => handleFormatChange('MM:SS')}
+          className="font-mono min-w-[80px] h-8"
+          disabled={isRunning}
+        >
+          MINUTES
+        </Button>
+        <Button
+          variant={timeFormat === 'HH:MM' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => handleFormatChange('HH:MM')}
+          className="font-mono min-w-[80px] h-8"
+          disabled={isRunning}
+        >
+          HOURS
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-4 gap-4 w-full max-w-2xl">
+        {digits.map((digit, index) => renderDigit(digit, index))}
+      </div>
     </div>
   )
 }

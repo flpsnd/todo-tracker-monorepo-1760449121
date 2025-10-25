@@ -20,16 +20,19 @@ export function CustomCheckbox({ checked, onChange, className, variant = 'defaul
       className={cn(
         "h-4 w-4 border-2 flex items-center justify-center transition-colors",
         isRed 
-          ? "border-red-500 hover:border-red-600" 
+          ? "border-black dark:border-white hover:border-black/80 dark:hover:border-white/80" 
           : "border-black",
         checked 
-          ? (isRed ? "bg-red-500 border-red-500" : "bg-black border-black")
+          ? (isRed ? "bg-black dark:bg-white border-black dark:border-white" : "bg-black border-black")
           : "bg-white/50",
         className
       )}
     >
       {checked && (
-        <Check className="h-3 w-3 text-white" />
+        <Check className={cn(
+          "h-3 w-3",
+          isRed ? "text-white dark:text-black" : "text-white"
+        )} />
       )}
     </button>
   )

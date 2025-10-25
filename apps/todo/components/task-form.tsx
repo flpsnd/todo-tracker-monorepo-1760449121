@@ -4,6 +4,7 @@ import type React from "react"
 
 import { useState } from "react"
 import { motion } from "framer-motion"
+import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -53,7 +54,8 @@ export function TaskForm({ onSubmit }: TaskFormProps) {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Enter task title"
-              className="font-mono text-sm"
+              className="font-mono text-base"
+              style={{ fontSize: '16px' }}
             />
           </div>
 
@@ -66,12 +68,14 @@ export function TaskForm({ onSubmit }: TaskFormProps) {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Enter task description"
-              className="min-h-12 resize-none font-mono text-sm"
+              className="min-h-12 resize-none font-mono text-base"
+              style={{ fontSize: '16px' }}
               rows={2}
             />
           </div>
 
-          <Button type="submit" className="w-1/4 font-mono text-sm">
+          <Button type="submit" className="px-4 py-2 font-mono text-sm flex items-center gap-2">
+            <Plus className="h-4 w-4" />
             Add Task
           </Button>
         </div>
