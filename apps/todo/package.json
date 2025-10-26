@@ -27,7 +27,6 @@
     "next-themes": "latest",
     "react": "^19",
     "react-dom": "^19",
-    "resend": "^6.1.2",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
     "tw-animate-css": "latest"

@@ -1,13 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { authClient } from "@/lib/auth-client";
+import { useSession, signIn, signOut } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LogOut, Mail } from "lucide-react";
 
 export function AuthButton() {
-  const { data: session, isPending } = authClient.useSession();
+  const { data: session, isPending } = useSession();
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -20,9 +20,10 @@ export function AuthButton() {
     setMessage("");
 
     try {
-      await authClient.signIn.magicLink({
+      // Use the correct BetterAuth magic link method
+      await signIn.emailMagicLink({ 
         email,
-        callbackURL: window.location.origin,
+        callbackURL: `${process.env.NEXT_PUBLIC_APP_URL}/app`, // Same origin
       });
       setMessage("Check your email for the magic link!");
     } catch (error) {
@@ -35,7 +36,7 @@ export function AuthButton() {
 
   const handleSignOut = async () => {
     try {
-      await authClient.signOut();
+      await signOut();
     } catch (error) {
       console.error("Sign out error:", error);
     }

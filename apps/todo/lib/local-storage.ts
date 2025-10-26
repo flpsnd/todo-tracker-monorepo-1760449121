@@ -15,7 +15,23 @@ function rebuildTask(task: PlainTask): Task {
   return {
     ...task,
     id: task.id,
+    clientId: task.clientId,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
     _id: task._id,
+  };
+}
+
+export function ensureLocalTask(task: Task): Task {
+  const now = Date.now();
+  return {
+    ...task,
+    id: task.id || (typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)),
+    clientId:
+      task.clientId ||
+      (typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)),
+    createdAt: task.createdAt ?? now,
+    updatedAt: task.updatedAt ?? now,
   };
 }
 
@@ -24,7 +40,7 @@ export function loadLocalTasks(): Task[] {
   try {
     const data = localStorage.getItem(STORAGE_KEY);
     const parsed: PlainTask[] = data ? JSON.parse(data) : [];
-    return parsed.map(rebuildTask);
+    return parsed.map((task) => ensureLocalTask(rebuildTask(task)));
   } catch (error) {
     console.error("Failed to load local tasks:", error);
     return [];
@@ -34,7 +50,8 @@ export function loadLocalTasks(): Task[] {
 export function saveLocalTasks(tasks: Task[]): void {
   if (typeof window === "undefined") return;
   try {
-    const plain: PlainTask[] = tasks.map((task) => ({
+    const sanitized = tasks.map(ensureLocalTask);
+    const plain: PlainTask[] = sanitized.map((task) => ({
       ...task,
       _id: task._id,
     }));
@@ -96,7 +113,7 @@ export function addDeletedTask(task: Task): void {
   try {
     const deletedTasks = getDeletedTasks();
     const deletedTask: DeletedTask = {
-      task,
+      task: ensureLocalTask(task),
       deletedAt: Date.now(),
     };
     

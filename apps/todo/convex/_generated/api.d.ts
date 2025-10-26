@@ -11,6 +11,8 @@
 import type * as auth from "../auth.js";
 import type * as email from "../email.js";
 import type * as http from "../http.js";
+import type * as leadsEmail from "../leadsEmail.js";
+import type * as notes from "../notes.js";
 import type * as subscriptions from "../subscriptions.js";
 import type * as tasks from "../tasks.js";
 
@@ -32,6 +34,8 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   email: typeof email;
   http: typeof http;
+  leadsEmail: typeof leadsEmail;
+  notes: typeof notes;
   subscriptions: typeof subscriptions;
   tasks: typeof tasks;
 }>;

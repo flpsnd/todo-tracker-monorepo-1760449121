@@ -1,13 +1,21 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback } from "react"
-import { ChevronDown, Eye, EyeOff, Plus } from "lucide-react"
+import { useState, useEffect, useCallback, useMemo } from "react"
+import { ChevronDown, Eye, EyeOff, Plus, Trash2, X, Square } from "lucide-react"
 import { AnimatePresence } from "framer-motion"
 import { useQuery, useMutation } from "convex/react"
 import { api } from "@/convex/_generated/api"
-import { authClient } from "@/lib/auth-client"
+import { useSession, signOut } from "@/lib/auth-client"
 import { Doc } from "@/convex/_generated/dataModel"
-import { loadLocalTasks, saveLocalTasks, getDeletedTasks, addDeletedTask, removeDeletedTask, replaceTaskIds } from "@/lib/local-storage"
+import {
+  loadLocalTasks,
+  saveLocalTasks,
+  getDeletedTasks,
+  addDeletedTask,
+  removeDeletedTask,
+  clearLocalTasks,
+  ensureLocalTask,
+} from "@/lib/local-storage";
 import { TaskForm } from "@/components/task-form"
 import { TaskSection } from "@/components/task-section"
 import { ThemeToggle } from "@/components/theme-toggle"
@@ -17,18 +25,20 @@ import { Toaster } from "@/components/ui/toaster"
 import { useToast } from "@/components/ui/use-toast"
 import { ToastAction } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
-import { Trash2, X, RefreshCw, CheckSquare, Square } from "lucide-react"
 import { ColorPicker } from "@/components/color-picker"
 import { ErrorBoundary } from "@/components/error-boundary"
 
 export interface Task {
-  id: string
-  _id?: string // Convex ID (only present for synced tasks)
-  title: string
-  description: string
-  color: string
-  section: string
-  completed: boolean
+  id: string;
+  clientId: string;
+  _id?: string; // Convex ID (only present for synced tasks)
+  title: string;
+  description: string;
+  color: string;
+  section: string;
+  completed: boolean;
+  createdAt: number;
+  updatedAt: number;
 }
 
 function getOrdinalSuffix(day: number): string {
@@ -73,22 +83,36 @@ function fromConvexTask(task: Doc<"tasks">): Task {
   return {
     id: task._id,
     _id: task._id,
+    clientId: task.clientId,
     title: task.title,
     description: task.description,
     color: task.color,
     section: task.section,
     completed: task.completed,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
   }
 }
 
-function mergeTasks(remote: Task[], local: Task[]): Task[] {
-  if (remote.length === 0) {
-    return local
-  }
-
-  const remoteIds = new Set(remote.map((task) => task._id))
-  const leftover = local.filter((task) => !task._id || !remoteIds.has(task._id))
-  return [...remote, ...leftover]
+function createLocalTask(partial: {
+  id?: string;
+  clientId?: string;
+  title: string;
+  description: string;
+  color: string;
+}): Task {
+  const now = Date.now();
+  return {
+    id: partial.id ?? crypto.randomUUID(),
+    clientId: partial.clientId ?? crypto.randomUUID(),
+    title: partial.title,
+    description: partial.description,
+    color: partial.color,
+    section: "day-0",
+    completed: false,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 export default function Home() {
@@ -101,7 +125,9 @@ export default function Home() {
   const [syncStatus, setSyncStatus] = useState<"local-only" | "syncing" | "synced" | "error">("local-only")
   const [hasInitialized, setHasInitialized] = useState(false)
   const [isMigrating, setIsMigrating] = useState(false)
-  const [deletedTasksQueue, setDeletedTasksQueue] = useState<Array<{task: Task, timeoutId: NodeJS.Timeout}>>([])
+  const [migrationError, setMigrationError] = useState<string | null>(null)
+  const [pendingMigrationCount, setPendingMigrationCount] = useState(0)
+  const [deletedTasksQueue, setDeletedTasksQueue] = useState<Array<{ task: Task; timeoutId: NodeJS.Timeout }>>([]);
 
   // Select mode state
   const [isSelectMode, setIsSelectMode] = useState(false)
@@ -117,10 +143,10 @@ export default function Home() {
   })
 
   // Auth state - using Better Auth session
-  const { data: session } = authClient.useSession()
+  const { data: session, isPending } = useSession()
   const hasSession = Boolean(session?.user)
   const isAuthenticated = hasSession
-  const isLoading = false
+  const isLoading = isPending
   
   // Debug auth state
   useEffect(() => {
@@ -162,200 +188,153 @@ export default function Home() {
   // Initialize app with local-first logic
   useEffect(() => {
     if (hasInitialized) return
-    const localTasks = loadLocalTasks()
+    const localTasks = loadLocalTasks().map(ensureLocalTask)
     setTasks(localTasks)
     setHasInitialized(true)
   }, [hasInitialized])
 
-  // Handle authentication state changes
   useEffect(() => {
-    if (!hasSession) {
-      // OFFLINE MODE: Use local storage only
-      setSyncStatus("local-only")
-      setIsMigrating(false)
-      return
-    }
+    if (!hasSession || isLoading || convexTaskDocs === undefined) return
 
-    if (convexTaskDocs === undefined) {
-      // Still loading Convex data
-      setSyncStatus("syncing")
-      return
-    }
+    const userId = session?.user?.id ?? session?.user?.email
+    if (!userId) return
 
-    // Don't overwrite tasks if we're in the middle of migration
-    if (isMigrating) {
-      console.log("Migration in progress, keeping local tasks visible")
-      return
-    }
-
-    // AUTHED MODE: Use Convex data
-    const convexTasks = convexTaskDocs.map(fromConvexTask)
-    setTasks(convexTasks)
-    
-    // Only update localStorage if we have Convex tasks (not empty)
-    if (convexTasks.length > 0) {
-      saveLocalTasks(convexTasks)
-    }
-    
-    setSyncStatus("synced")
-  }, [hasSession, convexTaskDocs, isMigrating])
-
-  // One-time migration: Move local tasks to Convex when user logs in
-  useEffect(() => {
-    console.log("Migration effect triggered:", { 
-      isAuthenticated, 
-      isLoading,
-      convexTaskDocs: convexTaskDocs?.length, 
-      isMigrating 
-    })
-    
-    // Wait for auth to load
-    if (isLoading || convexTaskDocs === undefined) return
+    const migrationFlagKey = `todo:migrated:${userId}`
+    const migrationFlag = typeof window !== "undefined" ? localStorage.getItem(migrationFlagKey) : null
+    if (migrationFlag === "true") return
 
     const localTasks = loadLocalTasks()
-    const hasLocalTasks = localTasks.length > 0
-    const hasConvexTasks = convexTaskDocs.length > 0
+    if (localTasks.length === 0) {
+      localStorage.setItem(migrationFlagKey, "true")
+      return
+    }
 
-    console.log("Migration check:", { 
-      hasLocalTasks, 
-      hasConvexTasks, 
-      isMigrating,
-      localTasksCount: localTasks.length,
-      convexTasksCount: convexTaskDocs.length
+    setIsMigrating(true)
+    setPendingMigrationCount(localTasks.length)
+    setMigrationError(null)
+
+    syncLocalTasksMutation({
+      tasks: localTasks.map((task) => ({
+        clientId: task.clientId,
+        title: task.title,
+        description: task.description,
+        color: task.color,
+        section: task.section,
+        completed: task.completed,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+      })),
     })
-
-    // If user has local tasks but no Convex tasks, migrate them
-    if (isAuthenticated && hasLocalTasks && !hasConvexTasks && !isMigrating) {
-      console.log("Starting migration of local tasks to Convex...", localTasks.length)
-      setIsMigrating(true)
-      setSyncStatus("syncing")
-      
-      syncLocalTasksMutation({
-        tasks: localTasks.map((task) => ({
-          title: task.title,
-          description: task.description,
-          color: task.color,
-          section: task.section,
-          completed: task.completed,
-        })),
-      }).then(() => {
-        console.log("Migration completed")
+      .then((result) => {
+        console.log("Migration result", result)
+        clearLocalTasks()
+        localStorage.setItem(migrationFlagKey, "true")
         setIsMigrating(false)
+        setPendingMigrationCount(0)
         setSyncStatus("synced")
-        // Clear local storage after successful migration
-        localStorage.removeItem("tasks")
-        // After successful migration, the Convex query will update and we'll switch to Convex data
-      }).catch((error) => {
-        console.error("Migration failed:", error)
+      })
+      .catch((error) => {
+        console.error("Migration failed", error)
+        setMigrationError("Cloud sync failed. Working locally.")
         setIsMigrating(false)
         setSyncStatus("error")
         toast({
           title: "Migration Error",
-          description: "Failed to migrate tasks to cloud. Working locally.",
+          description: "Failed to migrate tasks. You can retry from settings.",
           variant: "destructive",
         })
       })
-    }
-  }, [isAuthenticated, isLoading, convexTaskDocs, syncLocalTasksMutation, toast, isMigrating])
+  }, [hasSession, isLoading, convexTaskDocs, syncLocalTasksMutation, session, toast])
 
-  const addTask = useCallback(async (task: Omit<Task, "id" | "section" | "completed">) => {
-    console.log("addTask called:", { isAuthenticated, task })
-    
-    if (isAuthenticated) {
-      // AUTHED MODE: Save directly to Convex
-      try {
-        console.log("Attempting to add task to Convex...")
-        setSyncStatus("syncing")
-        const insertedId = await addTaskMutation({
-          title: task.title,
-          description: task.description,
-          color: task.color,
-          section: "day-0",
-          completed: false,
-        })
-        
-        console.log("Task added to Convex successfully:", insertedId)
-        
-        // Add to local state with Convex ID
-        const newTask: Task = {
-          id: insertedId,
-          _id: insertedId,
-          title: task.title,
-          description: task.description,
-          color: task.color,
-          section: "day-0",
-          completed: false,
-        }
-        
-        setTasks((prev) => {
-          const next = [...prev, newTask]
-          saveLocalTasks(next)
-          return next
-        })
-        
-        setSyncStatus("synced")
-      } catch (error) {
-        console.error("Failed to add task to Convex:", error)
-        setSyncStatus("error")
-        toast({
-          title: "Error",
-          description: "Failed to add task. Please try again.",
-          variant: "destructive",
-        })
-      }
-    } else {
-      // OFFLINE MODE: Save to local storage only
-      console.log("Adding task to local storage only")
-      const newTask: Task = {
-        ...task,
-        id: crypto.randomUUID(),
-        section: "day-0",
-        completed: false,
-      }
-      
-      setTasks((prev) => {
-        const next = [...prev, newTask]
-        saveLocalTasks(next)
-        return next
-      })
-    }
-  }, [isAuthenticated, addTaskMutation, toast])
+  const addTask = useCallback(
+    async (task: Omit<Task, "id" | "clientId" | "section" | "completed" | "createdAt" | "updatedAt" | "_id">) => {
+      const localTask = createLocalTask(task);
 
-  const updateTaskOrder = useCallback(async (section: string, newOrder: Task[]) => {
-    setTasks((prev) => {
-      const otherSectionTasks = prev.filter((t) => t.section !== section)
-      const updated = newOrder.map((task) => ({ ...task, section }))
-      const next = [...otherSectionTasks, ...updated]
-      saveLocalTasks(next)
-      return next
-    })
+      if (hasSession) {
+        try {
+          setSyncStatus("syncing");
+          const insertedId = await addTaskMutation({
+            clientId: localTask.clientId,
+            title: localTask.title,
+            description: localTask.description,
+            color: localTask.color,
+            section: localTask.section,
+            completed: localTask.completed,
+            createdAt: localTask.createdAt,
+            updatedAt: localTask.updatedAt,
+          });
 
-    // If authenticated, sync to Convex
-    if (session?.user) {
-      try {
-        setSyncStatus("syncing")
-        // Only sync tasks that have Convex IDs (not local UUIDs)
-        for (const task of newOrder) {
-          // Check if this is a Convex task (has _id field) or local task (has id field)
-          if (task._id) {
-        await updateTaskMutation({
-          taskId: task._id as any,
-          section: task.section,
-        })
+          if (insertedId) {
+            localTask._id = insertedId;
+            localTask.id = insertedId;
           }
+
+          setTasks((prev) => {
+            const next = [...prev, localTask];
+            saveLocalTasks(next);
+            return next;
+          });
+          setSyncStatus("synced");
+        } catch (error) {
+          console.error("Failed to add task to Convex:", error);
+          setSyncStatus("error");
+          toast({
+            title: "Cloud sync failed",
+            description: "Saving locally only.",
+            variant: "destructive",
+          });
+          setTasks((prev) => {
+            const next = [...prev, localTask];
+            saveLocalTasks(next);
+            return next;
+          });
         }
-        setSyncStatus("synced")
-      } catch (error) {
-        console.error("Failed to sync task order:", error)
-        setSyncStatus("error")
-        toast({
-          title: "Sync Error",
-          description: "Failed to sync task order. Changes saved locally.",
-          variant: "destructive",
-        })
+      } else {
+        setTasks((prev) => {
+          const next = [...prev, localTask];
+          saveLocalTasks(next);
+          return next;
+        });
       }
-    }
-  }, [session?.user, updateTaskMutation, toast])
+    },
+    [hasSession, addTaskMutation, toast]
+  );
+
+  const updateTaskOrder = useCallback(
+    async (section: string, newOrder: Task[]) => {
+      setTasks((prev) => {
+        const otherSectionTasks = prev.filter((t) => t.section !== section);
+        const updated = newOrder.map((task) => ({ ...task, section }));
+        const next = [...otherSectionTasks, ...updated];
+        saveLocalTasks(next);
+        return next;
+      });
+
+      if (session?.user) {
+        try {
+          setSyncStatus("syncing");
+          for (const task of newOrder) {
+            if (task._id) {
+              await updateTaskMutation({
+                taskId: task._id as any,
+                section: task.section,
+              });
+            }
+          }
+          setSyncStatus("synced");
+        } catch (error) {
+          console.error("Failed to sync task order:", error);
+          setSyncStatus("error");
+          toast({
+            title: "Sync Error",
+            description: "Failed to sync task order. Changes saved locally.",
+            variant: "destructive",
+          });
+        }
+      }
+    },
+    [session?.user, updateTaskMutation, toast]
+  );
 
   const moveTaskToSection = useCallback(async (taskId: string, targetSection: string) => {
     let movedTask: Task | undefined
@@ -371,25 +350,54 @@ export default function Home() {
       return next
     })
 
-    if (session?.user && movedTask?._id) {
-      try {
-        setSyncStatus("syncing")
-        await updateTaskMutation({
-          taskId: movedTask._id as any,
-          section: targetSection,
-        })
-        setSyncStatus("synced")
-      } catch (error) {
-        console.error("Failed to sync task move:", error)
-        setSyncStatus("error")
-        toast({
-          title: "Sync Error",
-          description: "Failed to sync task move. Changes saved locally.",
-          variant: "destructive",
-        })
+    if (session?.user && movedTask) {
+      if (movedTask._id) {
+        try {
+          setSyncStatus("syncing")
+          await updateTaskMutation({
+            taskId: movedTask._id as any,
+            section: targetSection,
+          })
+          setSyncStatus("synced")
+        } catch (error) {
+          console.error("Failed to sync task move:", error)
+          setSyncStatus("error")
+          toast({
+            title: "Sync Error",
+            description: "Failed to sync task move. Changes saved locally.",
+            variant: "destructive",
+          })
+        }
+      } else {
+        try {
+          setSyncStatus("syncing")
+          const insertedId = await addTaskMutation({
+            clientId: movedTask.clientId,
+            title: movedTask.title,
+            description: movedTask.description,
+            color: movedTask.color,
+            section: movedTask.section,
+            completed: movedTask.completed,
+            createdAt: movedTask.createdAt,
+            updatedAt: Date.now(),
+          })
+          if (insertedId) {
+            const replacements: Record<string, string> = { [movedTask.id]: insertedId }
+            setTasks((prev) => replaceTaskIds(prev, replacements))
+          }
+          setSyncStatus("synced")
+        } catch (error) {
+          console.error("Failed to sync new task move:", error)
+          setSyncStatus("error")
+          toast({
+            title: "Sync Error",
+            description: "Failed to sync task move. Working locally.",
+            variant: "destructive",
+          })
+        }
       }
     }
-  }, [session?.user, updateTaskMutation, toast])
+  }, [session?.user, updateTaskMutation, toast, addTaskMutation])
 
   const toggleTaskCompletion = useCallback(async (taskId: string) => {
     let toggledTask: Task | undefined
@@ -405,43 +413,71 @@ export default function Home() {
       return next
     })
 
-    if (session?.user && toggledTask?._id) {
-      try {
-        setSyncStatus("syncing")
-        await updateTaskMutation({
-          taskId: toggledTask._id as any,
-          completed: toggledTask.completed,
-        })
-        setSyncStatus("synced")
-      } catch (error) {
-        console.error("Failed to sync task completion:", error)
-        setSyncStatus("error")
-        toast({
-          title: "Sync Error",
-          description: "Failed to sync task completion. Changes saved locally.",
-          variant: "destructive",
-        })
+    if (session?.user && toggledTask) {
+      if (toggledTask._id) {
+        try {
+          setSyncStatus("syncing")
+          await updateTaskMutation({
+            taskId: toggledTask._id as any,
+            completed: toggledTask.completed,
+          })
+          setSyncStatus("synced")
+        } catch (error) {
+          console.error("Failed to sync task completion:", error)
+          setSyncStatus("error")
+          toast({
+            title: "Sync Error",
+            description: "Failed to sync task completion. Changes saved locally.",
+            variant: "destructive",
+          })
+        }
+      } else {
+        try {
+          setSyncStatus("syncing")
+          const insertedId = await addTaskMutation({
+            clientId: toggledTask.clientId,
+            title: toggledTask.title,
+            description: toggledTask.description,
+            color: toggledTask.color,
+            section: toggledTask.section,
+            completed: toggledTask.completed,
+            createdAt: toggledTask.createdAt,
+            updatedAt: toggledTask.updatedAt,
+          })
+          if (insertedId) {
+            const replacements: Record<string, string> = { [toggledTask.id]: insertedId }
+            setTasks((prev) => replaceTaskIds(prev, replacements))
+          }
+          setSyncStatus("synced")
+        } catch (error) {
+          console.error("Failed to sync local task completion:", error)
+          setSyncStatus("error")
+          toast({
+            title: "Sync Error",
+            description: "Failed to sync task completion. Working locally.",
+            variant: "destructive",
+          })
+        }
       }
     }
-  }, [session?.user, updateTaskMutation, toast])
+  }, [session?.user, updateTaskMutation, toast, addTaskMutation, setTasks])
 
   const updateTask = useCallback(async (taskId: string, updates: Partial<Task>) => {
     const task = tasks.find(t => t.id === taskId)
     if (!task) return
 
-    // Update local state immediately
+    const updatedTask: Task = {
+      ...task,
+      ...updates,
+      updatedAt: Date.now(),
+    }
+
     setTasks((prev) => {
-      const next = prev.map((t) => {
-        if (t.id === taskId) {
-          return { ...t, ...updates }
-        }
-        return t
-      })
+      const next = prev.map((t) => (t.id === taskId ? updatedTask : t))
       saveLocalTasks(next)
       return next
     })
 
-    // If authenticated and task has Convex ID, sync to Convex
     if (isAuthenticated && task._id) {
       try {
         setSyncStatus("syncing")
@@ -450,6 +486,7 @@ export default function Home() {
           ...updates,
         })
         setSyncStatus("synced")
+        return
       } catch (error) {
         console.error("Failed to sync task update:", error)
         setSyncStatus("error")
@@ -460,24 +497,47 @@ export default function Home() {
         })
       }
     }
-  }, [isAuthenticated, updateTaskMutation, tasks, toast])
+
+    if (isAuthenticated && !task._id) {
+      try {
+        setSyncStatus("syncing")
+        const insertedId = await addTaskMutation({
+          clientId: updatedTask.clientId,
+          title: updatedTask.title,
+          description: updatedTask.description,
+          color: updatedTask.color,
+          section: updatedTask.section,
+          completed: updatedTask.completed,
+          createdAt: updatedTask.createdAt,
+          updatedAt: updatedTask.updatedAt,
+        })
+        if (insertedId) {
+          const replacements: Record<string, string> = { [updatedTask.id]: insertedId }
+          setTasks((prev) => replaceTaskIds(prev, replacements))
+        }
+        setSyncStatus("synced")
+      } catch (error) {
+        console.error("Failed to sync local task update:", error)
+        setSyncStatus("error")
+        toast({
+          title: "Sync Error",
+          description: "Failed to sync task update.",
+          variant: "destructive",
+        })
+      }
+    }
+  }, [tasks, isAuthenticated, updateTaskMutation, toast, addTaskMutation, setTasks])
 
   const deleteTask = useCallback(async (taskId: string) => {
     const taskToDelete = tasks.find(t => t.id === taskId)
     if (!taskToDelete) return
     
-    // Remove from visible tasks immediately
     setTasks((prev) => prev.filter(t => t.id !== taskId))
-    
-    // Remove from localStorage immediately to persist deletion
     const currentTasks = loadLocalTasks()
     const filteredTasks = currentTasks.filter(t => t.id !== taskId)
     saveLocalTasks(filteredTasks)
-    
-    // Add to localStorage deleted tasks for restore functionality
     addDeletedTask(taskToDelete)
     
-    // If authenticated and task has Convex ID, delete from Convex
     if (isAuthenticated && taskToDelete._id) {
       try {
         setSyncStatus("syncing")
@@ -493,22 +553,6 @@ export default function Home() {
         })
       }
     }
-    
-    // Set 60s timeout for permanent deletion from deleted tasks
-    const timeoutId = setTimeout(() => {
-      removeDeletedTask(taskId)
-    }, 60000)
-    
-    // Add to deleted queue for timeout management
-    setDeletedTasksQueue(prev => [...prev, { task: taskToDelete, timeoutId }])
-    
-    // Show toast with restore action
-    toast({
-      title: "Task deleted",
-      description: taskToDelete.title,
-      action: <ToastAction altText="Restore" onClick={() => restoreTask(taskId)}>Restore</ToastAction>,
-      duration: 60000
-    })
   }, [isAuthenticated, deleteTaskMutation, tasks, toast])
 
   const restoreTask = async (taskId: string) => {
@@ -755,6 +799,15 @@ export default function Home() {
     })
   }
 
+  const retryMigration = useCallback(() => {
+    if (!session?.user) return
+    const userId = session.user.id ?? session.user.email
+    if (!userId) return
+    localStorage.removeItem(`todo:migrated:${userId}`)
+    setMigrationError(null)
+    setIsMigrating(false)
+  }, [session])
+
   const sections = Array.from({ length: 30 }, (_, i) => getDayInfo(i))
 
   return (
@@ -764,14 +817,33 @@ export default function Home() {
         setSyncStatus("error");
       }}
     >
-      <main className="min-h-screen bg-background p-8 pb-24" style={{ paddingBottom: '700px' }}>
+      <main className="min-h-screen bg-background p-8 pb-24" style={{ paddingBottom: "700px" }}>
         <div className="mx-auto max-w-2xl space-y-3">
+          {isMigrating && (
+            <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm font-mono text-muted-foreground flex items-center justify-between">
+              <span>Syncing {pendingMigrationCount} task{pendingMigrationCount === 1 ? "" : "s"} to cloud…</span>
+              <span className="animate-pulse">Please keep the tab open</span>
+            </div>
+          )}
+          {migrationError && (
+            <div className="rounded-lg border border-red-500 bg-red-500/10 p-3 text-sm font-mono text-red-600 flex items-center justify-between">
+              <span>{migrationError}</span>
+              <button
+                onClick={retryMigration}
+                className="underline underline-offset-4"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <button 
               onClick={() => setIsFormOpen(!isFormOpen)}
               className="flex items-center gap-2 font-mono text-2xl font-semibold hover:opacity-80 transition-opacity"
+              disabled={isMigrating}
             >
-              <span>Add task</span>
+              <span>{isMigrating ? "Syncing tasks" : "Add task"}</span>
               {isFormOpen ? (
                 <ChevronDown className="h-6 w-6 transition-transform duration-200" />
               ) : (
@@ -788,8 +860,9 @@ export default function Home() {
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-sm text-muted-foreground">{session.user.email}</span>
                     <button
-                      onClick={() => authClient.signOut()}
+                      onClick={() => signOut()}
                       className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm"
+                      disabled={isMigrating}
                     >
                       Sign out
                     </button>
@@ -806,137 +879,134 @@ export default function Home() {
             </div>
           </div>
 
-        <AnimatePresence>
-          {isFormOpen && <TaskForm onSubmit={addTask} />}
-        </AnimatePresence>
+          <AnimatePresence>{isFormOpen && !isMigrating && <TaskForm onSubmit={addTask} />}</AnimatePresence>
 
-        {sections.map((dayInfo) => {
-          let sectionTasks = tasks.filter((t) => t.section === dayInfo.key)
-          
-          // Sort tasks: active first, then completed
-          sectionTasks = sectionTasks.sort((a, b) => {
-            if (a.completed === b.completed) return 0
-            return a.completed ? 1 : -1
-          })
-          
-          // Filter out completed tasks if showCompleted is false
-          if (!showCompleted) {
-            sectionTasks = sectionTasks.filter((t) => !t.completed)
-          }
-          
-          const hasTasksOrIsTarget = sectionTasks.length > 0
-          const shouldShow = dayInfo.daysFromNow === 0 || hasTasksOrIsTarget || isDragging
+          {sections.map((dayInfo) => {
+            let sectionTasks = tasks.filter((t) => t.section === dayInfo.key);
+            sectionTasks = sectionTasks
+              .slice()
+              .sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1));
 
-          return (
-            <TaskSection
-              key={dayInfo.key}
-              title={dayInfo.title}
-              tasks={sectionTasks}
-              section={dayInfo.key}
-              onReorder={updateTaskOrder}
-              onDragStart={(taskSection) => {
-                setIsDragging(true)
-                setDraggingTaskSection(taskSection)
-                setHoveredSection(null)
-              }}
-              onDragEnd={() => {
-                setIsDragging(false)
-                setDraggingTaskSection(null)
-                setHoveredSection(null)
-              }}
-              onMoveToSection={moveTaskToSection}
-              onToggleCompletion={toggleTaskCompletion}
-              onUpdateTask={updateTask}
-              onDelete={deleteTask}
-              shouldShow={shouldShow}
-              isDragging={isDragging}
-              isCurrentSection={draggingTaskSection === dayInfo.key}
-              draggingTaskSection={draggingTaskSection}
-              hoveredSection={hoveredSection}
-              onSectionHover={setHoveredSection}
-              isSelectMode={isSelectMode}
-              selectedTaskIds={selectedTaskIds}
-              onSelect={handleTaskSelect}
-            />
-          )
-        })}
-      </div>
+            if (!showCompleted) {
+              sectionTasks = sectionTasks.filter((t) => !t.completed);
+            }
 
-      {/* Sticky Bottom UI */}
-      <div 
-        className={`fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-40 transition-transform duration-300 ease-in-out ${
-          isFocusMode || isDragging ? 'translate-y-full' : 'translate-y-0'
-        }`}
-      >
-        <div className="mx-auto max-w-2xl">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              {/* Multi-purpose delete button */}
-              {isSelectMode ? (
-                <div className="flex items-center gap-2">
+            const hasTasksOrIsTarget = sectionTasks.length > 0;
+            const shouldShow = dayInfo.daysFromNow === 0 || hasTasksOrIsTarget || isDragging;
+
+            return (
+              <TaskSection
+                key={dayInfo.key}
+                title={dayInfo.title}
+                tasks={sectionTasks}
+                section={dayInfo.key}
+                onReorder={isMigrating ? () => {} : updateTaskOrder}
+                onDragStart={(taskSection) => {
+                  if (!isMigrating) {
+                    setIsDragging(true)
+                    setDraggingTaskSection(taskSection)
+                    setHoveredSection(null)
+                  }
+                }}
+                onDragEnd={() => {
+                  if (!isMigrating) {
+                    setIsDragging(false)
+                    setDraggingTaskSection(null)
+                    setHoveredSection(null)
+                  }
+                }}
+                onMoveToSection={isMigrating ? () => {} : moveTaskToSection}
+                onToggleCompletion={isMigrating ? () => {} : toggleTaskCompletion}
+                onUpdateTask={isMigrating ? () => {} : updateTask}
+                onDelete={isMigrating ? () => {} : deleteTask}
+                shouldShow={shouldShow}
+                isDragging={isDragging}
+                isCurrentSection={draggingTaskSection === dayInfo.key}
+                draggingTaskSection={draggingTaskSection}
+                hoveredSection={hoveredSection}
+                onSectionHover={setHoveredSection}
+                isSelectMode={isSelectMode}
+                selectedTaskIds={selectedTaskIds}
+                onSelect={handleTaskSelect}
+              />
+            )
+          })}
+        </div>
+
+        <div
+          className={`fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-40 transition-transform duration-300 ease-in-out ${
+            isFocusMode || isDragging ? "translate-y-full" : "translate-y-0"
+          }`}
+        >
+          <div className="mx-auto max-w-2xl">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                {isSelectMode ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleBulkDelete}
+                      disabled={selectedTaskIds.length === 0 || isMigrating}
+                      className={`rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm disabled:opacity-50 disabled:cursor-not-allowed ${
+                        selectedTaskIds.length === 0 || isMigrating
+                          ? "bg-background text-muted-foreground"
+                          : "bg-red-500 hover:bg-red-600 text-white border-red-500"
+                      }`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete ({selectedTaskIds.length})
+                    </button>
+                    <ColorPicker
+                      currentColor="#ffb3ba"
+                      onColorChange={isMigrating ? () => {} : handleBulkColorChange}
+                      side="top"
+                      trigger={
+                        <button className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm bg-background">
+                          Change color
+                        </button>
+                      }
+                    />
+                    <button
+                      onClick={cancelSelectMode}
+                      className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm bg-background"
+                      disabled={isMigrating}
+                    >
+                      <X className="h-4 w-4" />
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
                   <button
-                    onClick={handleBulkDelete}
-                    disabled={selectedTaskIds.length === 0}
-                    className={`rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm disabled:opacity-50 disabled:cursor-not-allowed ${
-                      selectedTaskIds.length === 0 
-                        ? "bg-background text-muted-foreground" 
-                        : "bg-red-500 hover:bg-red-600 text-white border-red-500"
-                    }`}
+                    onClick={toggleSelectMode}
+                    className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm"
+                    disabled={isMigrating}
                   >
-                    <Trash2 className="h-4 w-4" />
-                    Delete ({selectedTaskIds.length})
+                    <Square className="h-4 w-4" />
+                    Select
                   </button>
-                  <ColorPicker
-                    currentColor="#ffb3ba"
-                    onColorChange={handleBulkColorChange}
-                    side="top"
-                    trigger={
-                      <button className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm bg-background">
-                        Change color
-                      </button>
-                    }
-                  />
-                  <button
-                    onClick={cancelSelectMode}
-                    className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm bg-background"
-                  >
-                    <X className="h-4 w-4" />
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={toggleSelectMode}
-                  className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm"
-                >
-                  <Square className="h-4 w-4" />
-                  Select
-                </button>
-              )}
+                )}
+              </div>
+              <button
+                onClick={() => setShowCompleted(!showCompleted)}
+                className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2"
+                aria-label="Toggle completed tasks visibility"
+                disabled={isMigrating}
+              >
+                {showCompleted ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                <span className="font-mono text-sm">{showCompleted ? "Hide" : "Show"} completed</span>
+              </button>
             </div>
-            <button
-              onClick={() => setShowCompleted(!showCompleted)}
-              className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2"
-              aria-label="Toggle completed tasks visibility"
-            >
-              {showCompleted ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-              <span className="font-mono text-sm">{showCompleted ? "Hide" : "Show"} completed</span>
-            </button>
           </div>
         </div>
-      </div>
 
-      {/* Delete Confirmation Dialog */}
-      <DeleteConfirmationDialog
-        isOpen={showDeleteConfirmation}
-        onClose={() => setShowDeleteConfirmation(false)}
-        onConfirm={confirmBulkDelete}
-        selectedTasks={tasks.filter(task => selectedTaskIds.includes(task.id))}
-      />
+        <DeleteConfirmationDialog
+          isOpen={showDeleteConfirmation}
+          onClose={() => setShowDeleteConfirmation(false)}
+          onConfirm={confirmBulkDelete}
+          selectedTasks={tasks.filter((task) => selectedTaskIds.includes(task.id))}
+        />
 
-      {/* Toast Container */}
-      <Toaster />
-    </main>
+        <Toaster />
+      </main>
     </ErrorBoundary>
-  )
+  );
 }

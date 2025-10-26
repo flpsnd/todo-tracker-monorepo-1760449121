@@ -15,7 +15,6 @@
     "@vercel/analytics": "latest",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "convex": "^1.27.5",
     "framer-motion": "latest",
     "geist": "latest",
     "lucide-react": "^0.454.0",
