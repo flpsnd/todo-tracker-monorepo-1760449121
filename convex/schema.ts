@@ -9,11 +9,11 @@ export default defineSchema({
     color: v.string(),
     section: v.string(),
     completed: v.boolean(),
-    userId: v.id("user"),
+    userEmail: v.string(),
     clientId: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_user", ["userId"]).index("by_user_client", ["userId", "clientId"]),
+  }).index("by_user", ["userEmail"]).index("by_user_client", ["userEmail", "clientId"]),
 
   // Subscriptions table for tracker app
   subscriptions: defineTable({

@@ -4,7 +4,12 @@ const CONVEX_AUTH_BASE_URL = process.env.NEXT_PUBLIC_CONVEX_SITE_URL!;
 
 async function proxy(request: Request, method: "GET" | "POST") {
   const url = new URL(request.url);
-  const convexUrl = `${CONVEX_AUTH_BASE_URL}${url.pathname}${url.search}`;
+  let pathname = url.pathname;
+  if (pathname === "/api/auth/sign-in/email-magic-link") {
+    pathname = "/api/auth/magic-link/send";
+  }
+
+  const convexUrl = `${CONVEX_AUTH_BASE_URL}${pathname}${url.search}`;
 
   console.log("Auth proxy ->", method, convexUrl);
 

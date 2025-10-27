@@ -21,9 +21,9 @@ export function AuthButton() {
 
     try {
       // Use the correct BetterAuth magic link method
-      await signIn.emailMagicLink({ 
+      await signIn.magicLink({ 
         email,
-        callbackURL: `${process.env.NEXT_PUBLIC_APP_URL}/app`, // Same origin
+        callbackURL: window.location.origin,
       });
       setMessage("Check your email for the magic link!");
     } catch (error) {

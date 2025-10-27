@@ -1,5 +1,6 @@
 import { createAuthClient } from "better-auth/react";
 import { convexClient } from "@convex-dev/better-auth/client/plugins";
+import { magicLinkClient } from "better-auth/client/plugins";
 
 function resolveBaseURL(): string {
   if (typeof window !== "undefined") {
@@ -21,7 +22,8 @@ export const authClient = createAuthClient({
   baseURL: resolveBaseURL(),
   credentials: "include", // Critical for cookies
   plugins: [
-    convexClient(), // This plugin handles token management for Convex
+    convexClient(), // Handles Convex auth integration
+    magicLinkClient(), // Enables magic link client routes
   ],
 });
 

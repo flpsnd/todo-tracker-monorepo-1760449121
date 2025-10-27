@@ -94,6 +94,19 @@ function fromConvexTask(task: Doc<"tasks">): Task {
   }
 }
 
+function replaceTaskIds(tasks: Task[], replacements: Record<string, string>): Task[] {
+  return tasks.map(task => {
+    if (replacements[task.id]) {
+      return {
+        ...task,
+        id: replacements[task.id],
+        _id: replacements[task.id],
+      }
+    }
+    return task
+  })
+}
+
 function createLocalTask(partial: {
   id?: string;
   clientId?: string;
@@ -185,13 +198,38 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
+  // Sync Convex tasks to local state when authenticated (initial load only)
+  useEffect(() => {
+    if (isAuthenticated && convexTaskDocs && !isMigrating && hasInitialized) {
+      // Only sync if we don't have tasks yet (initial load)
+      if (tasks.length === 0) {
+        const convexTasks: Task[] = convexTaskDocs.map(doc => ({
+          id: doc._id,
+          clientId: doc.clientId,
+          _id: doc._id,
+          title: doc.title,
+          description: doc.description,
+          color: doc.color,
+          section: doc.section,
+          completed: doc.completed,
+          createdAt: doc.createdAt,
+          updatedAt: doc.updatedAt,
+        }));
+        setTasks(convexTasks);
+      }
+    }
+  }, [isAuthenticated, convexTaskDocs, isMigrating, hasInitialized, tasks.length]);
+
   // Initialize app with local-first logic
   useEffect(() => {
     if (hasInitialized) return
-    const localTasks = loadLocalTasks().map(ensureLocalTask)
-    setTasks(localTasks)
+    // Only load local tasks if not authenticated (to avoid overriding Convex data)
+    if (!isAuthenticated) {
+      const localTasks = loadLocalTasks().map(ensureLocalTask)
+      setTasks(localTasks)
+    }
     setHasInitialized(true)
-  }, [hasInitialized])
+  }, [hasInitialized, isAuthenticated])
 
   useEffect(() => {
     if (!hasSession || isLoading || convexTaskDocs === undefined) return
@@ -269,9 +307,10 @@ export default function Home() {
             localTask.id = insertedId;
           }
 
+          // Update state without localStorage when authenticated
           setTasks((prev) => {
             const next = [...prev, localTask];
-            saveLocalTasks(next);
+            // Don't save to localStorage - Convex is source of truth
             return next;
           });
           setSyncStatus("synced");
@@ -280,11 +319,12 @@ export default function Home() {
           setSyncStatus("error");
           toast({
             title: "Cloud sync failed",
-            description: "Saving locally only.",
+            description: "Failed to add task.",
             variant: "destructive",
           });
           setTasks((prev) => {
             const next = [...prev, localTask];
+            // Fallback to localStorage on error
             saveLocalTasks(next);
             return next;
           });
@@ -302,22 +342,30 @@ export default function Home() {
 
   const updateTaskOrder = useCallback(
     async (section: string, newOrder: Task[]) => {
+      const isAuthenticated = !!session?.user;
+
+      // Update local state immediately
       setTasks((prev) => {
         const otherSectionTasks = prev.filter((t) => t.section !== section);
         const updated = newOrder.map((task) => ({ ...task, section }));
         const next = [...otherSectionTasks, ...updated];
-        saveLocalTasks(next);
+        
+        // Only save to localStorage if NOT authenticated
+        if (!isAuthenticated) {
+          saveLocalTasks(next);
+        }
+        
         return next;
       });
 
-      if (session?.user) {
+      if (isAuthenticated) {
         try {
           setSyncStatus("syncing");
           for (const task of newOrder) {
             if (task._id) {
               await updateTaskMutation({
                 taskId: task._id as any,
-                section: task.section,
+                section: section,
               });
             }
           }
@@ -327,7 +375,7 @@ export default function Home() {
           setSyncStatus("error");
           toast({
             title: "Sync Error",
-            description: "Failed to sync task order. Changes saved locally.",
+            description: "Failed to sync task order.",
             variant: "destructive",
           });
         }
@@ -337,7 +385,9 @@ export default function Home() {
   );
 
   const moveTaskToSection = useCallback(async (taskId: string, targetSection: string) => {
+    const isAuthenticated = !!session?.user;
     let movedTask: Task | undefined
+    
     setTasks((prev) => {
       const next = prev.map((task) => {
         if (task.id === taskId) {
@@ -346,11 +396,16 @@ export default function Home() {
         }
         return task
       })
-      saveLocalTasks(next)
+      
+      // Only save to localStorage if NOT authenticated
+      if (!isAuthenticated) {
+        saveLocalTasks(next)
+      }
+      
       return next
     })
 
-    if (session?.user && movedTask) {
+    if (isAuthenticated && movedTask) {
       if (movedTask._id) {
         try {
           setSyncStatus("syncing")
@@ -400,7 +455,9 @@ export default function Home() {
   }, [session?.user, updateTaskMutation, toast, addTaskMutation])
 
   const toggleTaskCompletion = useCallback(async (taskId: string) => {
+    const isAuthenticated = !!session?.user;
     let toggledTask: Task | undefined
+    
     setTasks((prev) => {
       const next = prev.map((task) => {
         if (task.id === taskId) {
@@ -409,11 +466,16 @@ export default function Home() {
         }
         return task
       })
-      saveLocalTasks(next)
+      
+      // Only save to localStorage if NOT authenticated
+      if (!isAuthenticated) {
+        saveLocalTasks(next)
+      }
+      
       return next
     })
 
-    if (session?.user && toggledTask) {
+    if (isAuthenticated && toggledTask) {
       if (toggledTask._id) {
         try {
           setSyncStatus("syncing")
@@ -463,6 +525,7 @@ export default function Home() {
   }, [session?.user, updateTaskMutation, toast, addTaskMutation, setTasks])
 
   const updateTask = useCallback(async (taskId: string, updates: Partial<Task>) => {
+    const isAuthenticated = !!session?.user;
     const task = tasks.find(t => t.id === taskId)
     if (!task) return
 
@@ -474,7 +537,12 @@ export default function Home() {
 
     setTasks((prev) => {
       const next = prev.map((t) => (t.id === taskId ? updatedTask : t))
-      saveLocalTasks(next)
+      
+      // Only save to localStorage if NOT authenticated
+      if (!isAuthenticated) {
+        saveLocalTasks(next)
+      }
+      
       return next
     })
 
@@ -529,14 +597,19 @@ export default function Home() {
   }, [tasks, isAuthenticated, updateTaskMutation, toast, addTaskMutation, setTasks])
 
   const deleteTask = useCallback(async (taskId: string) => {
+    const isAuthenticated = !!session?.user;
     const taskToDelete = tasks.find(t => t.id === taskId)
     if (!taskToDelete) return
     
     setTasks((prev) => prev.filter(t => t.id !== taskId))
-    const currentTasks = loadLocalTasks()
-    const filteredTasks = currentTasks.filter(t => t.id !== taskId)
-    saveLocalTasks(filteredTasks)
-    addDeletedTask(taskToDelete)
+    
+    // Only save to localStorage if NOT authenticated
+    if (!isAuthenticated) {
+      const currentTasks = loadLocalTasks()
+      const filteredTasks = currentTasks.filter(t => t.id !== taskId)
+      saveLocalTasks(filteredTasks)
+      addDeletedTask(taskToDelete)
+    }
     
     if (isAuthenticated && taskToDelete._id) {
       try {
@@ -700,30 +773,37 @@ export default function Home() {
     const updatedTasks = tasks.filter(task => !selectedTaskIds.includes(task.id))
     setTasks(updatedTasks)
     
-    // Remove from localStorage immediately to persist deletion
-    const currentTasks = loadLocalTasks()
-    const filteredTasks = currentTasks.filter(task => !selectedTaskIds.includes(task.id))
-    saveLocalTasks(filteredTasks)
+    const isAuthenticated = !!session?.user;
     
-    // Add all tasks to deleted tasks localStorage
-    for (const task of selectedTasks) {
-      addDeletedTask(task)
+    // Only save to localStorage if NOT authenticated
+    if (!isAuthenticated) {
+      // Remove from localStorage immediately to persist deletion
+      const currentTasks = loadLocalTasks()
+      const filteredTasks = currentTasks.filter(task => !selectedTaskIds.includes(task.id))
+      saveLocalTasks(filteredTasks)
+      
+      // Add all tasks to deleted tasks localStorage
+      for (const task of selectedTasks) {
+        addDeletedTask(task)
+      }
     }
     
     // Set timeouts for permanent deletion
     const timeoutIds: NodeJS.Timeout[] = []
     for (const task of selectedTasks) {
       const timeoutId = setTimeout(() => {
-        // Remove from localStorage
-        const currentTasks = loadLocalTasks()
-        const filteredTasks = currentTasks.filter(t => t.id !== task.id)
-        saveLocalTasks(filteredTasks)
-        
-        // Remove from deleted tasks localStorage
-        removeDeletedTask(task.id)
+        // Only remove from localStorage if NOT authenticated
+        if (!isAuthenticated) {
+          const currentTasks = loadLocalTasks()
+          const filteredTasks = currentTasks.filter(t => t.id !== task.id)
+          saveLocalTasks(filteredTasks)
+          
+          // Remove from deleted tasks localStorage
+          removeDeletedTask(task.id)
+        }
         
         // Permanently delete from Convex if authenticated
-        if (session?.user && task._id) {
+        if (isAuthenticated && task._id) {
           deleteTaskMutation({ taskId: task._id as any })
         }
       }, 60000)
@@ -756,6 +836,7 @@ export default function Home() {
   }
 
   const handleBulkColorChange = async (newColor: string) => {
+    const isAuthenticated = !!session?.user;
     if (selectedTaskIds.length === 0) return
 
     const updatedTasks = tasks.map((task) => 
@@ -764,10 +845,14 @@ export default function Home() {
         : task
     )
     setTasks(updatedTasks)
-    saveLocalTasks(updatedTasks)
+    
+    // Only save to localStorage if NOT authenticated
+    if (!isAuthenticated) {
+      saveLocalTasks(updatedTasks)
+    }
     
     // If authenticated, sync to Convex
-    if (session?.user) {
+    if (isAuthenticated) {
       try {
         setSyncStatus("syncing")
         for (const taskId of selectedTaskIds) {

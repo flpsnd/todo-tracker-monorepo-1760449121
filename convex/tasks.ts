@@ -1,7 +1,6 @@
 import { mutation, query, MutationCtx } from "./_generated/server";
 import { v, Infer } from "convex/values";
 import { authComponent } from "./auth";
-import type { Id } from "./_generated/dataModel";
 
 const taskPayloadValidator = v.object({
   clientId: v.string(),
@@ -20,20 +19,20 @@ type UpsertResult = "inserted" | "updated" | "skipped";
 
 async function upsertTask(
   ctx: MutationCtx,
-  userId: Id<"user">,
+  userEmail: string,
   task: TaskPayload,
 ): Promise<UpsertResult> {
   const existing = await ctx.db
     .query("tasks")
     .withIndex("by_user_client", (q) =>
-      q.eq("userId", userId).eq("clientId", task.clientId)
+      q.eq("userEmail", userEmail).eq("clientId", task.clientId)
     )
     .unique();
 
   if (!existing) {
     await ctx.db.insert("tasks", {
       ...task,
-      userId,
+      userEmail,
     });
     return "inserted";
   }
@@ -67,6 +66,7 @@ export const getTasks = query({
       completed: v.boolean(),
       createdAt: v.number(),
       updatedAt: v.number(),
+      userEmail: v.string(),
     })
   ),
   handler: async (ctx) => {
@@ -77,7 +77,7 @@ export const getTasks = query({
 
     return ctx.db
       .query("tasks")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .withIndex("by_user", (q) => q.eq("userEmail", user.email))
       .collect();
   },
 });
@@ -101,7 +101,7 @@ export const addTask = mutation({
     const createdAt = args.createdAt ?? now;
     const updatedAt = args.updatedAt ?? now;
 
-    await upsertTask(ctx, user._id, {
+    await upsertTask(ctx, user.email, {
       clientId: args.clientId,
       title: args.title,
       description: args.description,
@@ -115,7 +115,7 @@ export const addTask = mutation({
     const existing = await ctx.db
       .query("tasks")
       .withIndex("by_user_client", (q) =>
-        q.eq("userId", user._id).eq("clientId", args.clientId)
+        q.eq("userEmail", user.email).eq("clientId", args.clientId)
       )
       .unique();
     return existing?._id ?? null;
@@ -136,7 +136,7 @@ export const updateTask = mutation({
     if (!user) throw new Error("Not authenticated");
 
     const existing = await ctx.db.get(args.taskId);
-    if (!existing || existing.userId !== user._id) {
+    if (!existing || existing.userEmail !== user.email) {
       throw new Error("Task not found");
     }
 
@@ -162,7 +162,7 @@ export const deleteTask = mutation({
       if (!user) throw new Error("Not authenticated");
 
       const existing = await ctx.db.get(args.taskId);
-      if (!existing || existing.userId !== user._id) {
+      if (!existing || existing.userEmail !== user.email) {
         throw new Error("Task not found");
       }
 
@@ -187,7 +187,7 @@ export const syncLocalTasks = mutation({
     let skipped = 0;
 
     for (const task of args.tasks) {
-      const result = await upsertTask(ctx, user._id, task);
+      const result = await upsertTask(ctx, user.email, task);
       if (result === "inserted") inserted++;
       else if (result === "updated") updated++;
       else skipped++;
