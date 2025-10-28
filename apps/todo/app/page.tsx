@@ -39,6 +39,7 @@ export interface Task {
   completed: boolean;
   createdAt: number;
   updatedAt: number;
+  position: number;
 }
 
 function getOrdinalSuffix(day: number): string {
@@ -107,24 +108,26 @@ function replaceTaskIds(tasks: Task[], replacements: Record<string, string>): Ta
   })
 }
 
-function createLocalTask(partial: {
-  id?: string;
-  clientId?: string;
-  title: string;
-  description: string;
-  color: string;
-}): Task {
+type CreateLocalTaskArgs = Partial<Omit<Task, "_id">> & Pick<Task, "title" | "description" | "color">;
+
+function createLocalTask(partial: CreateLocalTaskArgs): Task {
   const now = Date.now();
+  const createdAt = partial.createdAt ?? now;
+  const positionBase = partial.position ?? createdAt;
+
   return {
-    id: partial.id ?? crypto.randomUUID(),
-    clientId: partial.clientId ?? crypto.randomUUID(),
+    id: partial.id ?? (typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)),
+    clientId:
+      partial.clientId ??
+      (typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)),
     title: partial.title,
     description: partial.description,
     color: partial.color,
-    section: "day-0",
-    completed: false,
-    createdAt: now,
-    updatedAt: now,
+    section: partial.section ?? "day-0",
+    completed: partial.completed ?? false,
+    createdAt,
+    updatedAt: partial.updatedAt ?? now,
+    position: positionBase,
   };
 }
 
@@ -201,8 +204,11 @@ export default function Home() {
   // Sync Convex tasks to local state when authenticated (initial load only)
   useEffect(() => {
     if (isAuthenticated && convexTaskDocs && !isMigrating && hasInitialized) {
-      // Only sync if we don't have tasks yet (initial load)
-      if (tasks.length === 0) {
+      // Check if this is initial load
+      // Only sync if tasks are empty (initial load after migration or first visit)
+      const shouldSync = tasks.length === 0 || tasks.some((task) => !task._id);
+      
+      if (shouldSync) {
         const convexTasks: Task[] = convexTaskDocs.map(doc => ({
           id: doc._id,
           clientId: doc.clientId,
@@ -214,7 +220,9 @@ export default function Home() {
           completed: doc.completed,
           createdAt: doc.createdAt,
           updatedAt: doc.updatedAt,
+          position: doc.position,
         }));
+        
         setTasks(convexTasks);
       }
     }
@@ -223,13 +231,18 @@ export default function Home() {
   // Initialize app with local-first logic
   useEffect(() => {
     if (hasInitialized) return
+    
+    // Only initialize after auth state is determined
+    if (isLoading) return // Wait for auth to load
+    
     // Only load local tasks if not authenticated (to avoid overriding Convex data)
     if (!isAuthenticated) {
       const localTasks = loadLocalTasks().map(ensureLocalTask)
       setTasks(localTasks)
     }
+    // If authenticated, don't set any tasks here - let the sync effect handle it
     setHasInitialized(true)
-  }, [hasInitialized, isAuthenticated])
+  }, [hasInitialized, isAuthenticated, isLoading])
 
   useEffect(() => {
     if (!hasSession || isLoading || convexTaskDocs === undefined) return
@@ -261,6 +274,7 @@ export default function Home() {
         completed: task.completed,
         createdAt: task.createdAt,
         updatedAt: task.updatedAt,
+        position: task.position ?? task.createdAt ?? Date.now(),
       })),
     })
       .then((result) => {
@@ -300,6 +314,7 @@ export default function Home() {
             completed: localTask.completed,
             createdAt: localTask.createdAt,
             updatedAt: localTask.updatedAt,
+          position: localTask.position,
           });
 
           if (insertedId) {
@@ -347,7 +362,7 @@ export default function Home() {
       // Update local state immediately
       setTasks((prev) => {
         const otherSectionTasks = prev.filter((t) => t.section !== section);
-        const updated = newOrder.map((task) => ({ ...task, section }));
+        const updated = newOrder.map((task, index) => ({ ...task, section, position: index }));
         const next = [...otherSectionTasks, ...updated];
         
         // Only save to localStorage if NOT authenticated
@@ -361,11 +376,12 @@ export default function Home() {
       if (isAuthenticated) {
         try {
           setSyncStatus("syncing");
-          for (const task of newOrder) {
+          for (const [index, task] of newOrder.entries()) {
             if (task._id) {
               await updateTaskMutation({
                 taskId: task._id as any,
                 section: section,
+                position: index,
               });
             }
           }
@@ -396,13 +412,25 @@ export default function Home() {
         }
         return task
       })
+      // Reassign positions within each section
+      const sections = new Map<string, Task[]>();
+      for (const task of next) {
+        const list = sections.get(task.section) ?? [];
+        list.push(task);
+        sections.set(task.section, list);
+      }
+      const updated = next.map((task) => {
+        const list = sections.get(task.section)!;
+        const index = list.indexOf(task);
+        return { ...task, position: index };
+      });
       
       // Only save to localStorage if NOT authenticated
       if (!isAuthenticated) {
-        saveLocalTasks(next)
+        saveLocalTasks(updated)
       }
       
-      return next
+      return updated
     })
 
     if (isAuthenticated && movedTask) {
@@ -412,6 +440,7 @@ export default function Home() {
           await updateTaskMutation({
             taskId: movedTask._id as any,
             section: targetSection,
+            position: movedTask.position,
           })
           setSyncStatus("synced")
         } catch (error) {

@@ -225,3 +225,4 @@ The core problem is that Better Auth sessions are not being properly passed to C
 
 *Last Updated: October 25, 2025*
 *Status: Critical - Authentication not working for Convex functions*
+

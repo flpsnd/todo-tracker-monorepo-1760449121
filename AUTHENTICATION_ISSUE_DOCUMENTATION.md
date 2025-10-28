@@ -223,3 +223,4 @@ Once fixed, the authentication flow should work as follows:
 ## Contact
 
 This issue was documented on October 25, 2025. The authentication integration between Better Auth and Convex is not working properly, preventing users from syncing their local tasks to the cloud database.
+

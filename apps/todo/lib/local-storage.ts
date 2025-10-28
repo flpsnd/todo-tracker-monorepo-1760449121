@@ -19,6 +19,7 @@ function rebuildTask(task: PlainTask): Task {
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     _id: task._id,
+    position: task.position ?? task.createdAt ?? Date.now(),
   };
 }
 
@@ -32,6 +33,7 @@ export function ensureLocalTask(task: Task): Task {
       (typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)),
     createdAt: task.createdAt ?? now,
     updatedAt: task.updatedAt ?? now,
+    position: task.position ?? task.createdAt ?? now,
   };
 }
 
@@ -50,7 +52,10 @@ export function loadLocalTasks(): Task[] {
 export function saveLocalTasks(tasks: Task[]): void {
   if (typeof window === "undefined") return;
   try {
-    const sanitized = tasks.map(ensureLocalTask);
+    const sanitized = tasks.map(ensureLocalTask).map((task) => ({
+      ...task,
+      position: task.position ?? task.createdAt ?? Date.now(),
+    }));
     const plain: PlainTask[] = sanitized.map((task) => ({
       ...task,
       _id: task._id,
