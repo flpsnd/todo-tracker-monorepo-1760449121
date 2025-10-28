@@ -27,6 +27,9 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
   const y = useMotionValue(0)
   const cardRef = useRef<HTMLLIElement>(null)
   
+  // Store the target section in a ref instead of DOM attribute
+  const targetSectionRef = useRef<string | null>(null)
+  
   // Editing state
   const [editingField, setEditingField] = useState<'title' | 'description' | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -182,7 +185,7 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
         
         // Store the target section for drop
         if (targetSection) {
-          cardRef.current?.setAttribute("data-target-section", targetSection)
+          targetSectionRef.current = targetSection;
         }
       }
     })
@@ -219,8 +222,9 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
 
           // Only allow drops if user has dragged enough distance
           if (hasDraggedEnough.current) {
-            const targetSection = cardRef.current?.getAttribute("data-target-section")
+            const targetSection = targetSectionRef.current;
             if (targetSection && targetSection !== task.section) {
+              console.log("Moving task", task.id, "from", task.section, "to", targetSection);
               onMoveToSection(task.id, targetSection)
             }
           }
@@ -228,6 +232,7 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
           // Reset drag tracking
           dragStartPosition.current = null
           hasDraggedEnough.current = false
+          targetSectionRef.current = null;
         }}
       style={{ y }}
       className={isSelectMode ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}

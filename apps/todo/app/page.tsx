@@ -6,7 +6,7 @@ import { AnimatePresence } from "framer-motion"
 import { useQuery, useMutation } from "convex/react"
 import { api } from "@/convex/_generated/api"
 import { useSession, signOut } from "@/lib/auth-client"
-import { Doc } from "@/convex/_generated/dataModel"
+import { Doc, Id } from "@/convex/_generated/dataModel"
 import {
   loadLocalTasks,
   saveLocalTasks,
@@ -31,7 +31,7 @@ import { ErrorBoundary } from "@/components/error-boundary"
 export interface Task {
   id: string;
   clientId: string;
-  _id?: string; // Convex ID (only present for synced tasks)
+  _id?: Id<"tasks">; // Convex ID (only present for synced tasks)
   title: string;
   description: string;
   color: string;
@@ -39,7 +39,6 @@ export interface Task {
   completed: boolean;
   createdAt: number;
   updatedAt: number;
-  position: number;
 }
 
 function getOrdinalSuffix(day: number): string {
@@ -95,7 +94,7 @@ function fromConvexTask(task: Doc<"tasks">): Task {
   }
 }
 
-function replaceTaskIds(tasks: Task[], replacements: Record<string, string>): Task[] {
+function replaceTaskIds(tasks: Task[], replacements: Record<string, Id<"tasks">>): Task[] {
   return tasks.map(task => {
     if (replacements[task.id]) {
       return {
@@ -108,26 +107,24 @@ function replaceTaskIds(tasks: Task[], replacements: Record<string, string>): Ta
   })
 }
 
-type CreateLocalTaskArgs = Partial<Omit<Task, "_id">> & Pick<Task, "title" | "description" | "color">;
-
-function createLocalTask(partial: CreateLocalTaskArgs): Task {
+function createLocalTask(partial: {
+  id?: string;
+  clientId?: string;
+  title: string;
+  description: string;
+  color: string;
+}): Task {
   const now = Date.now();
-  const createdAt = partial.createdAt ?? now;
-  const positionBase = partial.position ?? createdAt;
-
   return {
-    id: partial.id ?? (typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)),
-    clientId:
-      partial.clientId ??
-      (typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)),
+    id: partial.id ?? crypto.randomUUID(),
+    clientId: partial.clientId ?? crypto.randomUUID(),
     title: partial.title,
     description: partial.description,
     color: partial.color,
-    section: partial.section ?? "day-0",
-    completed: partial.completed ?? false,
-    createdAt,
-    updatedAt: partial.updatedAt ?? now,
-    position: positionBase,
+    section: "day-0",
+    completed: false,
+    createdAt: now,
+    updatedAt: now,
   };
 }
 
@@ -206,7 +203,7 @@ export default function Home() {
     if (isAuthenticated && convexTaskDocs && !isMigrating && hasInitialized) {
       // Check if this is initial load
       // Only sync if tasks are empty (initial load after migration or first visit)
-      const shouldSync = tasks.length === 0 || tasks.some((task) => !task._id);
+      const shouldSync = tasks.length === 0;
       
       if (shouldSync) {
         const convexTasks: Task[] = convexTaskDocs.map(doc => ({
@@ -220,7 +217,6 @@ export default function Home() {
           completed: doc.completed,
           createdAt: doc.createdAt,
           updatedAt: doc.updatedAt,
-          position: doc.position,
         }));
         
         setTasks(convexTasks);
@@ -274,7 +270,6 @@ export default function Home() {
         completed: task.completed,
         createdAt: task.createdAt,
         updatedAt: task.updatedAt,
-        position: task.position ?? task.createdAt ?? Date.now(),
       })),
     })
       .then((result) => {
@@ -314,7 +309,6 @@ export default function Home() {
             completed: localTask.completed,
             createdAt: localTask.createdAt,
             updatedAt: localTask.updatedAt,
-          position: localTask.position,
           });
 
           if (insertedId) {
@@ -359,29 +353,43 @@ export default function Home() {
     async (section: string, newOrder: Task[]) => {
       const isAuthenticated = !!session?.user;
 
-      // Update local state immediately
+      const prevSectionTasks = tasks.filter((t) => t.section === section);
+      const newOrderIds = newOrder.map((task) => task.id);
+      const prevIds = prevSectionTasks.map((task) => task.id);
+
+      const sameMembership =
+        newOrderIds.length === prevIds.length &&
+        newOrderIds.every((id) => prevIds.includes(id));
+
+      if (!sameMembership) {
+        console.log("Skipping updateTaskOrder - membership changed");
+        return;
+      }
+
       setTasks((prev) => {
         const otherSectionTasks = prev.filter((t) => t.section !== section);
-        const updated = newOrder.map((task, index) => ({ ...task, section, position: index }));
-        const next = [...otherSectionTasks, ...updated];
-        
-        // Only save to localStorage if NOT authenticated
+
+        const reordered = newOrderIds
+          .map((id) => prev.find((task) => task.id === id))
+          .filter((task): task is Task => Boolean(task));
+
+        const next = [...otherSectionTasks, ...reordered];
+
         if (!isAuthenticated) {
           saveLocalTasks(next);
         }
-        
+
         return next;
       });
 
       if (isAuthenticated) {
         try {
           setSyncStatus("syncing");
-          for (const [index, task] of newOrder.entries()) {
+          for (const task of newOrder) {
             if (task._id) {
               await updateTaskMutation({
-                taskId: task._id as any,
-                section: section,
-                position: index,
+                taskId: task._id,
+                section,
               });
             }
           }
@@ -397,51 +405,55 @@ export default function Home() {
         }
       }
     },
-    [session?.user, updateTaskMutation, toast]
+    [session?.user, updateTaskMutation, toast, tasks]
   );
 
   const moveTaskToSection = useCallback(async (taskId: string, targetSection: string) => {
+    console.log("moveTaskToSection called with:", { taskId, targetSection });
     const isAuthenticated = !!session?.user;
-    let movedTask: Task | undefined
+    console.log("isAuthenticated:", isAuthenticated);
+    
+    // Find the task before updating state to avoid async issues
+    const taskToMove = tasks.find(task => task.id === taskId);
+    if (!taskToMove) {
+      console.error("Task not found:", taskId);
+      return;
+    }
+    
+    const movedTask: Task = { ...taskToMove, section: targetSection };
+    console.log("Found and updated task:", movedTask);
     
     setTasks((prev) => {
       const next = prev.map((task) => {
         if (task.id === taskId) {
-          movedTask = { ...task, section: targetSection }
           return movedTask
         }
         return task
       })
-      // Reassign positions within each section
-      const sections = new Map<string, Task[]>();
-      for (const task of next) {
-        const list = sections.get(task.section) ?? [];
-        list.push(task);
-        sections.set(task.section, list);
-      }
-      const updated = next.map((task) => {
-        const list = sections.get(task.section)!;
-        const index = list.indexOf(task);
-        return { ...task, position: index };
-      });
       
       // Only save to localStorage if NOT authenticated
       if (!isAuthenticated) {
-        saveLocalTasks(updated)
+        saveLocalTasks(next)
       }
       
-      return updated
+      return next
     })
+
+    console.log("After setTasks - movedTask:", movedTask);
+    console.log("movedTask._id:", movedTask._id);
 
     if (isAuthenticated && movedTask) {
       if (movedTask._id) {
         try {
           setSyncStatus("syncing")
-          await updateTaskMutation({
-            taskId: movedTask._id as any,
+          console.log("Syncing to Convex:", { taskId: movedTask._id, section: targetSection });
+          console.log("movedTask object:", JSON.stringify(movedTask, null, 2));
+          console.log("About to call updateTaskMutation...");
+          const result = await updateTaskMutation({
+            taskId: movedTask._id,
             section: targetSection,
-            position: movedTask.position,
           })
+          console.log("updateTaskMutation result:", result);
           setSyncStatus("synced")
         } catch (error) {
           console.error("Failed to sync task move:", error)
@@ -453,6 +465,7 @@ export default function Home() {
           })
         }
       } else {
+        console.log("Task has no _id, creating new task in Convex");
         try {
           setSyncStatus("syncing")
           const insertedId = await addTaskMutation({
@@ -466,7 +479,7 @@ export default function Home() {
             updatedAt: Date.now(),
           })
           if (insertedId) {
-            const replacements: Record<string, string> = { [movedTask.id]: insertedId }
+            const replacements: Record<string, Id<"tasks">> = { [movedTask.id]: insertedId }
             setTasks((prev) => replaceTaskIds(prev, replacements))
           }
           setSyncStatus("synced")
@@ -480,17 +493,26 @@ export default function Home() {
           })
         }
       }
+    } else {
+      console.log("Not syncing to Convex - isAuthenticated:", isAuthenticated, "movedTask:", !!movedTask);
     }
-  }, [session?.user, updateTaskMutation, toast, addTaskMutation])
+  }, [session?.user, updateTaskMutation, toast, addTaskMutation, tasks])
 
   const toggleTaskCompletion = useCallback(async (taskId: string) => {
     const isAuthenticated = !!session?.user;
-    let toggledTask: Task | undefined
+    
+    // Find the task before updating state to avoid async issues
+    const taskToToggle = tasks.find(task => task.id === taskId);
+    if (!taskToToggle) {
+      console.error("Task not found:", taskId);
+      return;
+    }
+    
+    const toggledTask: Task = { ...taskToToggle, completed: !taskToToggle.completed };
     
     setTasks((prev) => {
       const next = prev.map((task) => {
         if (task.id === taskId) {
-          toggledTask = { ...task, completed: !task.completed }
           return toggledTask
         }
         return task
@@ -509,7 +531,7 @@ export default function Home() {
         try {
           setSyncStatus("syncing")
           await updateTaskMutation({
-            taskId: toggledTask._id as any,
+            taskId: toggledTask._id,
             completed: toggledTask.completed,
           })
           setSyncStatus("synced")
@@ -536,7 +558,7 @@ export default function Home() {
             updatedAt: toggledTask.updatedAt,
           })
           if (insertedId) {
-            const replacements: Record<string, string> = { [toggledTask.id]: insertedId }
+            const replacements: Record<string, Id<"tasks">> = { [toggledTask.id]: insertedId }
             setTasks((prev) => replaceTaskIds(prev, replacements))
           }
           setSyncStatus("synced")
@@ -551,7 +573,7 @@ export default function Home() {
         }
       }
     }
-  }, [session?.user, updateTaskMutation, toast, addTaskMutation, setTasks])
+  }, [session?.user, updateTaskMutation, toast, addTaskMutation, tasks])
 
   const updateTask = useCallback(async (taskId: string, updates: Partial<Task>) => {
     const isAuthenticated = !!session?.user;
@@ -579,7 +601,7 @@ export default function Home() {
       try {
         setSyncStatus("syncing")
         await updateTaskMutation({
-          taskId: task._id as any,
+          taskId: task._id,
           ...updates,
         })
         setSyncStatus("synced")
@@ -609,7 +631,7 @@ export default function Home() {
           updatedAt: updatedTask.updatedAt,
         })
         if (insertedId) {
-          const replacements: Record<string, string> = { [updatedTask.id]: insertedId }
+          const replacements: Record<string, Id<"tasks">> = { [updatedTask.id]: insertedId }
           setTasks((prev) => replaceTaskIds(prev, replacements))
         }
         setSyncStatus("synced")
@@ -643,7 +665,7 @@ export default function Home() {
     if (isAuthenticated && taskToDelete._id) {
       try {
         setSyncStatus("syncing")
-        await deleteTaskMutation({ taskId: taskToDelete._id as any })
+        await deleteTaskMutation({ taskId: taskToDelete._id })
         setSyncStatus("synced")
       } catch (error) {
         console.error("Failed to delete task from Convex:", error)
@@ -833,7 +855,7 @@ export default function Home() {
         
         // Permanently delete from Convex if authenticated
         if (isAuthenticated && task._id) {
-          deleteTaskMutation({ taskId: task._id as any })
+          deleteTaskMutation({ taskId: task._id })
         }
       }, 60000)
       timeoutIds.push(timeoutId)
@@ -888,7 +910,7 @@ export default function Home() {
           const task = tasks.find(t => t.id === taskId)
           if (task?._id) {
         await updateTaskMutation({
-          taskId: task._id as any,
+          taskId: task._id,
           color: newColor,
         })
           }

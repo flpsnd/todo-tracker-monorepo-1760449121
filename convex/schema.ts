@@ -13,7 +13,6 @@ export default defineSchema({
     clientId: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),
-    position: v.number(),
   }).index("by_user", ["userEmail"]).index("by_user_client", ["userEmail", "clientId"]),
 
   // Subscriptions table for tracker app

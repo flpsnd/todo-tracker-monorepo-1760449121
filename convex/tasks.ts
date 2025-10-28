@@ -11,7 +11,6 @@ const taskPayloadValidator = v.object({
   completed: v.boolean(),
   createdAt: v.number(),
   updatedAt: v.number(),
-  position: v.number(),
 });
 
 type TaskPayload = Infer<typeof taskPayloadValidator>;
@@ -49,7 +48,6 @@ async function upsertTask(
     section: task.section,
     completed: task.completed,
     updatedAt: task.updatedAt,
-    position: task.position,
   });
   return "updated";
 }
@@ -69,7 +67,6 @@ export const getTasks = query({
       createdAt: v.number(),
       updatedAt: v.number(),
       userEmail: v.string(),
-      position: v.number(),
     })
   ),
   handler: async (ctx) => {
@@ -78,20 +75,10 @@ export const getTasks = query({
       return [];
     }
 
-    const tasks = await ctx.db
+    return ctx.db
       .query("tasks")
       .withIndex("by_user", (q) => q.eq("userEmail", user.email))
       .collect();
-    tasks.sort((a, b) => {
-      if (a.section === b.section) {
-        if (a.position === b.position) {
-          return a.createdAt - b.createdAt;
-        }
-        return a.position - b.position;
-      }
-      return a.section.localeCompare(b.section);
-    });
-    return tasks;
   },
 });
 
@@ -105,7 +92,6 @@ export const addTask = mutation({
     completed: v.boolean(),
     createdAt: v.optional(v.number()),
     updatedAt: v.optional(v.number()),
-    position: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const user = await authComponent.safeGetAuthUser(ctx);
@@ -124,7 +110,6 @@ export const addTask = mutation({
       completed: args.completed,
       createdAt,
       updatedAt,
-      position: args.position ?? Number.MAX_SAFE_INTEGER,
     });
 
     const existing = await ctx.db
@@ -145,7 +130,6 @@ export const updateTask = mutation({
     color: v.optional(v.string()),
     section: v.optional(v.string()),
     completed: v.optional(v.boolean()),
-    position: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const user = await authComponent.safeGetAuthUser(ctx);
@@ -164,7 +148,6 @@ export const updateTask = mutation({
       section: args.section ?? existing.section,
       completed: args.completed ?? existing.completed,
       updatedAt: now,
-      position: args.position ?? existing.position,
     });
   },
 });
