@@ -3,9 +3,10 @@ import type { Metadata } from "next"
 import { GeistSans } from "geist/font/sans"
 import { GeistMono } from "geist/font/mono"
 import { Analytics } from "@vercel/analytics/next"
-import { ThemeProvider } from "@/components/theme-provider"
 import { ConvexClientProvider } from "@/lib/convex-provider"
+import { ThemeProvider } from "@/components/theme-provider"
 import { Suspense } from "react"
+import { Databuddy } from '@databuddy/sdk/react'
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -32,6 +33,17 @@ export default function RootLayout({
           </ConvexClientProvider>
         </Suspense>
         <Analytics />
+        <Databuddy
+          clientId="Ist1zm3jrC2tx2VDD8bRp"
+          trackHashChanges={true}
+          trackAttributes={true}
+          trackInteractions={true}
+          trackEngagement={true}
+          trackScrollDepth={true}
+          trackBounceRate={true}
+          trackWebVitals={true}
+          enableBatching={true}
+        />
       </body>
     </html>
   )

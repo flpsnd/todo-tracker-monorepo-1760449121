@@ -7,7 +7,7 @@ const taskPayloadValidator = v.object({
   title: v.string(),
   description: v.string(),
   color: v.string(),
-  section: v.string(),
+  dueDate: v.string(), // ISO date string (YYYY-MM-DD)
   completed: v.boolean(),
   createdAt: v.number(),
   updatedAt: v.number(),
@@ -41,11 +41,23 @@ async function upsertTask(
     return "skipped";
   }
 
+  // Handle migration from section to dueDate
+  let dueDate = task.dueDate;
+  if (!dueDate && (task as any).section && (task as any).section.startsWith('day-')) {
+    const daysFromNow = parseInt((task as any).section.replace('day-', ''));
+    const date = new Date();
+    date.setDate(date.getDate() + daysFromNow);
+    dueDate = date.toISOString().split('T')[0];
+  }
+  if (!dueDate) {
+    dueDate = new Date().toISOString().split('T')[0]; // Default to today
+  }
+
   await ctx.db.patch(existing._id, {
     title: task.title,
     description: task.description,
     color: task.color,
-    section: task.section,
+    dueDate: dueDate,
     completed: task.completed,
     updatedAt: task.updatedAt,
   });
@@ -62,11 +74,13 @@ export const getTasks = query({
       title: v.string(),
       description: v.string(),
       color: v.string(),
-      section: v.string(),
+      dueDate: v.string(),
       completed: v.boolean(),
       createdAt: v.number(),
       updatedAt: v.number(),
       userEmail: v.string(),
+      isDeleted: v.optional(v.boolean()),
+      deletedAt: v.optional(v.number()),
     })
   ),
   handler: async (ctx) => {
@@ -78,6 +92,7 @@ export const getTasks = query({
     return ctx.db
       .query("tasks")
       .withIndex("by_user", (q) => q.eq("userEmail", user.email))
+      .filter((q) => q.neq(q.field("isDeleted"), true))
       .collect();
   },
 });
@@ -88,7 +103,7 @@ export const addTask = mutation({
     title: v.string(),
     description: v.string(),
     color: v.string(),
-    section: v.string(),
+    dueDate: v.string(),
     completed: v.boolean(),
     createdAt: v.optional(v.number()),
     updatedAt: v.optional(v.number()),
@@ -106,7 +121,7 @@ export const addTask = mutation({
       title: args.title,
       description: args.description,
       color: args.color,
-      section: args.section,
+      dueDate: args.dueDate,
       completed: args.completed,
       createdAt,
       updatedAt,
@@ -128,7 +143,7 @@ export const updateTask = mutation({
     title: v.optional(v.string()),
     description: v.optional(v.string()),
     color: v.optional(v.string()),
-    section: v.optional(v.string()),
+    dueDate: v.optional(v.string()),
     completed: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -145,7 +160,7 @@ export const updateTask = mutation({
       title: args.title ?? existing.title,
       description: args.description ?? existing.description,
       color: args.color ?? existing.color,
-      section: args.section ?? existing.section,
+      dueDate: args.dueDate ?? existing.dueDate,
       completed: args.completed ?? existing.completed,
       updatedAt: now,
     });
@@ -166,7 +181,12 @@ export const deleteTask = mutation({
         throw new Error("Task not found");
       }
 
-      await ctx.db.delete(args.taskId);
+      // Soft delete instead of hard delete
+      await ctx.db.patch(args.taskId, {
+        isDeleted: true,
+        deletedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
     } catch (error) {
       console.error("Error in deleteTask mutation:", error);
       throw error;
@@ -194,5 +214,56 @@ export const syncLocalTasks = mutation({
     }
 
     return { inserted, updated, skipped };
+  },
+});
+
+export const restoreTask = mutation({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    const user = await authComponent.safeGetAuthUser(ctx);
+    if (!user) throw new Error("Not authenticated");
+
+    const existing = await ctx.db.get(args.taskId);
+    if (!existing || existing.userEmail !== user.email) {
+      throw new Error("Task not found");
+    }
+
+    // Check if task was deleted within last 60 seconds
+    if (!existing.isDeleted || !existing.deletedAt) {
+      throw new Error("Task is not deleted");
+    }
+
+    const now = Date.now();
+    const deletedAt = existing.deletedAt;
+    if (now - deletedAt > 60000) {
+      throw new Error("Task cannot be restored after 60 seconds");
+    }
+
+    // Restore the task
+    await ctx.db.patch(args.taskId, {
+      isDeleted: undefined,
+      deletedAt: undefined,
+      updatedAt: now,
+    });
+  },
+});
+
+export const permanentlyDeleteTask = mutation({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    const user = await authComponent.safeGetAuthUser(ctx);
+    if (!user) throw new Error("Not authenticated");
+
+    const existing = await ctx.db.get(args.taskId);
+    if (!existing || existing.userEmail !== user.email) {
+      throw new Error("Task not found");
+    }
+
+    // Actually delete the task from database
+    await ctx.db.delete(args.taskId);
   },
 });

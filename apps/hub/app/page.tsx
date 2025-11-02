@@ -31,7 +31,7 @@ export default function Home() {
     <div className="min-h-screen bg-background pb-24">
       {/* Header */}
       <header>
-        <div className="max-w-2xl mx-auto px-4 py-6">
+        <div className="max-w-2xl mx-auto py-6">
           <div className="flex items-center justify-between">
             <h1 className="font-mono text-2xl font-bold text-foreground">
               Caalm

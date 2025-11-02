@@ -7,13 +7,15 @@ export default defineSchema({
     title: v.string(),
     description: v.string(),
     color: v.string(),
-    section: v.string(),
+    dueDate: v.string(), // ISO date string (YYYY-MM-DD)
     completed: v.boolean(),
     userEmail: v.string(),
     clientId: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_user", ["userEmail"]).index("by_user_client", ["userEmail", "clientId"]),
+    isDeleted: v.optional(v.boolean()),
+    deletedAt: v.optional(v.number()),
+  }).index("by_user", ["userEmail"]).index("by_user_client", ["userEmail", "clientId"]).index("by_user_date", ["userEmail", "dueDate"]).index("by_user_deleted", ["userEmail", "isDeleted"]),
 
   // Subscriptions table for tracker app
   subscriptions: defineTable({

@@ -35,7 +35,7 @@ export interface Task {
   title: string;
   description: string;
   color: string;
-  section: string;
+  dueDate: string; // ISO date string (YYYY-MM-DD)
   completed: boolean;
   createdAt: number;
   updatedAt: number;
@@ -50,6 +50,44 @@ function getOrdinalSuffix(day: number): string {
     case 2: return 'nd'
     case 3: return 'rd'
     default: return 'th'
+  }
+}
+
+function formatDate(date: Date): string {
+  return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD format
+}
+
+function getDateInfo(dateString: string) {
+  const date = new Date(dateString + 'T00:00:00'); // Ensure local timezone
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const diffTime = date.getTime() - today.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  
+  const dayName = date.toLocaleDateString("en-US", { weekday: "long" })
+  
+  let title: string
+  if (diffDays === 0) {
+    title = "Tasks for today"
+  } else if (diffDays === 1) {
+    title = "Tasks for tomorrow"
+  } else if (diffDays === -1) {
+    title = "Tasks for yesterday"
+  } else if (diffDays > 0 && diffDays <= 6) {
+    title = `Tasks for ${dayName}`
+  } else {
+    const day = date.getDate()
+    const month = date.toLocaleDateString("en-US", { month: "long" })
+    const ordinalSuffix = getOrdinalSuffix(day)
+    title = `Tasks for ${dayName}, ${day}${ordinalSuffix} ${month}`
+  }
+  
+  return {
+    key: dateString,
+    title,
+    date,
+    diffDays,
   }
 }
 
@@ -73,13 +111,26 @@ function getDayInfo(daysFromNow: number) {
   }
   
   return {
-    key: `day-${daysFromNow}`,
+    key: formatDate(date),
     title,
+    date,
     daysFromNow,
   }
 }
 
 function fromConvexTask(task: Doc<"tasks">): Task {
+  // Handle migration from section to dueDate
+  let dueDate = task.dueDate;
+  if (!dueDate && (task as any).section && (task as any).section.startsWith('day-')) {
+    const daysFromNow = parseInt((task as any).section.replace('day-', ''));
+    const date = new Date();
+    date.setDate(date.getDate() + daysFromNow);
+    dueDate = formatDate(date);
+  }
+  if (!dueDate) {
+    dueDate = formatDate(new Date()); // Default to today
+  }
+
   return {
     id: task._id,
     _id: task._id,
@@ -87,7 +138,7 @@ function fromConvexTask(task: Doc<"tasks">): Task {
     title: task.title,
     description: task.description,
     color: task.color,
-    section: task.section,
+    dueDate: dueDate,
     completed: task.completed,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
@@ -121,7 +172,7 @@ function createLocalTask(partial: {
     title: partial.title,
     description: partial.description,
     color: partial.color,
-    section: "day-0",
+    dueDate: formatDate(new Date()), // Default to today
     completed: false,
     createdAt: now,
     updatedAt: now,
@@ -141,6 +192,7 @@ export default function Home() {
   const [migrationError, setMigrationError] = useState<string | null>(null)
   const [pendingMigrationCount, setPendingMigrationCount] = useState(0)
   const [deletedTasksQueue, setDeletedTasksQueue] = useState<Array<{ task: Task; timeoutId: NodeJS.Timeout }>>([]);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Select mode state
   const [isSelectMode, setIsSelectMode] = useState(false)
@@ -176,6 +228,8 @@ export default function Home() {
   const addTaskMutation = useMutation(api.tasks.addTask)
   const updateTaskMutation = useMutation(api.tasks.updateTask)
   const deleteTaskMutation = useMutation(api.tasks.deleteTask)
+  const restoreTaskMutation = useMutation(api.tasks.restoreTask)
+  const permanentlyDeleteTaskMutation = useMutation(api.tasks.permanentlyDeleteTask)
   const syncLocalTasksMutation = useMutation(api.tasks.syncLocalTasks)
   
   // Toast hook
@@ -198,31 +252,44 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
-  // Sync Convex tasks to local state when authenticated (initial load only)
+  // Sync Convex tasks to local state when authenticated
   useEffect(() => {
-    if (isAuthenticated && convexTaskDocs && !isMigrating && hasInitialized) {
-      // Check if this is initial load
-      // Only sync if tasks are empty (initial load after migration or first visit)
-      const shouldSync = tasks.length === 0;
+    if (isAuthenticated && convexTaskDocs && !isMigrating && hasInitialized && !isDeleting) {
+      // Check if this is initial load or if we have new tasks from Convex
+      const shouldSync = tasks.length === 0 || convexTaskDocs.length > tasks.length;
       
       if (shouldSync) {
-        const convexTasks: Task[] = convexTaskDocs.map(doc => ({
-          id: doc._id,
-          clientId: doc.clientId,
-          _id: doc._id,
-          title: doc.title,
-          description: doc.description,
-          color: doc.color,
-          section: doc.section,
-          completed: doc.completed,
-          createdAt: doc.createdAt,
-          updatedAt: doc.updatedAt,
-        }));
+        const convexTasks: Task[] = convexTaskDocs.map(doc => {
+          // Handle migration from section to dueDate
+          let dueDate = doc.dueDate;
+          if (!dueDate && (doc as any).section && (doc as any).section.startsWith('day-')) {
+            const daysFromNow = parseInt((doc as any).section.replace('day-', ''));
+            const date = new Date();
+            date.setDate(date.getDate() + daysFromNow);
+            dueDate = formatDate(date);
+          }
+          if (!dueDate) {
+            dueDate = formatDate(new Date()); // Default to today
+          }
+
+          return {
+            id: doc._id,
+            clientId: doc.clientId,
+            _id: doc._id,
+            title: doc.title,
+            description: doc.description,
+            color: doc.color,
+            dueDate: dueDate,
+            completed: doc.completed,
+            createdAt: doc.createdAt,
+            updatedAt: doc.updatedAt,
+          };
+        });
         
         setTasks(convexTasks);
       }
     }
-  }, [isAuthenticated, convexTaskDocs, isMigrating, hasInitialized, tasks.length]);
+  }, [isAuthenticated, convexTaskDocs, isMigrating, hasInitialized, tasks.length, isDeleting]);
 
   // Initialize app with local-first logic
   useEffect(() => {
@@ -261,16 +328,30 @@ export default function Home() {
     setMigrationError(null)
 
     syncLocalTasksMutation({
-      tasks: localTasks.map((task) => ({
-        clientId: task.clientId,
-        title: task.title,
-        description: task.description,
-        color: task.color,
-        section: task.section,
-        completed: task.completed,
-        createdAt: task.createdAt,
-        updatedAt: task.updatedAt,
-      })),
+      tasks: localTasks.map((task) => {
+        // Convert old section format (day-0, day-1, etc.) to proper dates
+        let dueDate: string;
+        if ((task as any).section && (task as any).section.startsWith('day-')) {
+          const daysFromNow = parseInt((task as any).section.replace('day-', ''));
+          const date = new Date();
+          date.setDate(date.getDate() + daysFromNow);
+          dueDate = formatDate(date);
+        } else {
+          // If it's already a date string, use it; otherwise default to today
+          dueDate = task.dueDate || formatDate(new Date());
+        }
+        
+        return {
+          clientId: task.clientId,
+          title: task.title,
+          description: task.description,
+          color: task.color,
+          dueDate: dueDate,
+          completed: task.completed,
+          createdAt: task.createdAt,
+          updatedAt: task.updatedAt,
+        };
+      }),
     })
       .then((result) => {
         console.log("Migration result", result)
@@ -293,8 +374,89 @@ export default function Home() {
       })
   }, [hasSession, isLoading, convexTaskDocs, syncLocalTasksMutation, session, toast])
 
+  // Overdue task migration - runs when date changes (midnight detection)
+  useEffect(() => {
+    if (!hasInitialized) return;
+    
+    const checkAndMigrateOverdueTasks = async () => {
+      const today = formatDate(new Date());
+      const lastChecked = localStorage.getItem('lastTaskDateCheck');
+      
+      // Only run if date changed
+      if (lastChecked === today) return;
+      
+      // Find overdue uncompleted tasks
+      const overdueTasks = tasks.filter(t => 
+        !t.completed && t.dueDate < today
+      );
+      
+      if (overdueTasks.length > 0) {
+        console.log(`Found ${overdueTasks.length} overdue tasks, migrating to today`);
+        
+        const isAuthenticated = !!session?.user;
+        
+        // Update tasks to today's date
+        const updatedTasks = tasks.map(task => {
+          if (overdueTasks.some(ot => ot.id === task.id)) {
+            return { ...task, dueDate: today, updatedAt: Date.now() };
+          }
+          return task;
+        });
+        
+        setTasks(updatedTasks);
+        
+        // Sync to Convex if authenticated
+        if (isAuthenticated) {
+          try {
+            setSyncStatus("syncing");
+            for (const task of overdueTasks) {
+              if (task._id) {
+                await updateTaskMutation({
+                  taskId: task._id,
+                  dueDate: today,
+                });
+              }
+            }
+            setSyncStatus("synced");
+          } catch (error) {
+            console.error("Failed to sync overdue task migration:", error);
+            setSyncStatus("error");
+            toast({
+              title: "Sync Error",
+              description: "Failed to sync overdue tasks to cloud.",
+              variant: "destructive",
+            });
+          }
+        } else {
+          // Save to localStorage if not authenticated
+          saveLocalTasks(updatedTasks);
+        }
+        
+        // Show notification
+        toast({
+          title: "Overdue tasks moved",
+          description: `${overdueTasks.length} overdue task${overdueTasks.length !== 1 ? 's' : ''} moved to today`,
+          duration: 5000
+        });
+      }
+      
+      // Update last checked date
+      localStorage.setItem('lastTaskDateCheck', today);
+    };
+    
+    checkAndMigrateOverdueTasks();
+    
+    // Check on window focus (when user returns to app after midnight)
+    const handleFocus = () => {
+      checkAndMigrateOverdueTasks();
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [hasInitialized, tasks, isAuthenticated, updateTaskMutation, toast, session?.user]);
+
   const addTask = useCallback(
-    async (task: Omit<Task, "id" | "clientId" | "section" | "completed" | "createdAt" | "updatedAt" | "_id">) => {
+    async (task: Omit<Task, "id" | "clientId" | "dueDate" | "completed" | "createdAt" | "updatedAt" | "_id">) => {
       const localTask = createLocalTask(task);
 
       if (hasSession) {
@@ -305,7 +467,7 @@ export default function Home() {
             title: localTask.title,
             description: localTask.description,
             color: localTask.color,
-            section: localTask.section,
+            dueDate: localTask.dueDate,
             completed: localTask.completed,
             createdAt: localTask.createdAt,
             updatedAt: localTask.updatedAt,
@@ -350,12 +512,12 @@ export default function Home() {
   );
 
   const updateTaskOrder = useCallback(
-    async (section: string, newOrder: Task[]) => {
+    async (dueDate: string, newOrder: Task[]) => {
       const isAuthenticated = !!session?.user;
 
-      const prevSectionTasks = tasks.filter((t) => t.section === section);
+      const prevDateTasks = tasks.filter((t) => t.dueDate === dueDate);
       const newOrderIds = newOrder.map((task) => task.id);
-      const prevIds = prevSectionTasks.map((task) => task.id);
+      const prevIds = prevDateTasks.map((task) => task.id);
 
       const sameMembership =
         newOrderIds.length === prevIds.length &&
@@ -367,13 +529,13 @@ export default function Home() {
       }
 
       setTasks((prev) => {
-        const otherSectionTasks = prev.filter((t) => t.section !== section);
+        const otherDateTasks = prev.filter((t) => t.dueDate !== dueDate);
 
         const reordered = newOrderIds
           .map((id) => prev.find((task) => task.id === id))
           .filter((task): task is Task => Boolean(task));
 
-        const next = [...otherSectionTasks, ...reordered];
+        const next = [...otherDateTasks, ...reordered];
 
         if (!isAuthenticated) {
           saveLocalTasks(next);
@@ -389,7 +551,7 @@ export default function Home() {
             if (task._id) {
               await updateTaskMutation({
                 taskId: task._id,
-                section,
+                dueDate,
               });
             }
           }
@@ -408,8 +570,8 @@ export default function Home() {
     [session?.user, updateTaskMutation, toast, tasks]
   );
 
-  const moveTaskToSection = useCallback(async (taskId: string, targetSection: string) => {
-    console.log("moveTaskToSection called with:", { taskId, targetSection });
+  const moveTaskToSection = useCallback(async (taskId: string, targetDueDate: string) => {
+    console.log("moveTaskToSection called with:", { taskId, targetDueDate });
     const isAuthenticated = !!session?.user;
     console.log("isAuthenticated:", isAuthenticated);
     
@@ -420,7 +582,7 @@ export default function Home() {
       return;
     }
     
-    const movedTask: Task = { ...taskToMove, section: targetSection };
+    const movedTask: Task = { ...taskToMove, dueDate: targetDueDate };
     console.log("Found and updated task:", movedTask);
     
     setTasks((prev) => {
@@ -446,12 +608,12 @@ export default function Home() {
       if (movedTask._id) {
         try {
           setSyncStatus("syncing")
-          console.log("Syncing to Convex:", { taskId: movedTask._id, section: targetSection });
+          console.log("Syncing to Convex:", { taskId: movedTask._id, dueDate: targetDueDate });
           console.log("movedTask object:", JSON.stringify(movedTask, null, 2));
           console.log("About to call updateTaskMutation...");
           const result = await updateTaskMutation({
             taskId: movedTask._id,
-            section: targetSection,
+            dueDate: targetDueDate,
           })
           console.log("updateTaskMutation result:", result);
           setSyncStatus("synced")
@@ -473,7 +635,7 @@ export default function Home() {
             title: movedTask.title,
             description: movedTask.description,
             color: movedTask.color,
-            section: movedTask.section,
+            dueDate: movedTask.dueDate,
             completed: movedTask.completed,
             createdAt: movedTask.createdAt,
             updatedAt: Date.now(),
@@ -552,7 +714,7 @@ export default function Home() {
             title: toggledTask.title,
             description: toggledTask.description,
             color: toggledTask.color,
-            section: toggledTask.section,
+            dueDate: toggledTask.dueDate,
             completed: toggledTask.completed,
             createdAt: toggledTask.createdAt,
             updatedAt: toggledTask.updatedAt,
@@ -625,7 +787,7 @@ export default function Home() {
           title: updatedTask.title,
           description: updatedTask.description,
           color: updatedTask.color,
-          section: updatedTask.section,
+          dueDate: updatedTask.dueDate,
           completed: updatedTask.completed,
           createdAt: updatedTask.createdAt,
           updatedAt: updatedTask.updatedAt,
@@ -652,6 +814,7 @@ export default function Home() {
     const taskToDelete = tasks.find(t => t.id === taskId)
     if (!taskToDelete) return
     
+    setIsDeleting(true)
     setTasks((prev) => prev.filter(t => t.id !== taskId))
     
     // Only save to localStorage if NOT authenticated
@@ -660,16 +823,46 @@ export default function Home() {
       const filteredTasks = currentTasks.filter(t => t.id !== taskId)
       saveLocalTasks(filteredTasks)
       addDeletedTask(taskToDelete)
+      setIsDeleting(false)
     }
     
     if (isAuthenticated && taskToDelete._id) {
       try {
         setSyncStatus("syncing")
+        // Soft delete instead of hard delete
         await deleteTaskMutation({ taskId: taskToDelete._id })
+        
+        // Add to deleted queue for timeout management
+        const timeoutId = setTimeout(() => {
+          // Permanently delete after 60 seconds
+          permanentlyDeleteTaskMutation({ taskId: taskToDelete._id! })
+        }, 60000)
+        
+        const queueItem = { task: taskToDelete, timeoutId }
+        setDeletedTasksQueue(prev => [...prev, queueItem])
+        
+        // Also store in localStorage for persistence across re-renders
+        const existingQueue = JSON.parse(localStorage.getItem('deletedTasksQueue') || '[]')
+        existingQueue.push({
+          task: taskToDelete,
+          deletedAt: Date.now()
+        })
+        localStorage.setItem('deletedTasksQueue', JSON.stringify(existingQueue))
+        
         setSyncStatus("synced")
+        setIsDeleting(false)
+        
+        // Show toast with restore action
+        toast({
+          title: "Task deleted",
+          description: taskToDelete.title,
+          action: <ToastAction altText="Restore" onClick={() => restoreTask(taskId)}>Restore</ToastAction>,
+          duration: 60000
+        })
       } catch (error) {
         console.error("Failed to delete task from Convex:", error)
         setSyncStatus("error")
+        setIsDeleting(false)
         toast({
           title: "Delete Error",
           description: "Failed to delete task from cloud.",
@@ -677,112 +870,233 @@ export default function Home() {
         })
       }
     }
-  }, [isAuthenticated, deleteTaskMutation, tasks, toast])
+  }, [isAuthenticated, deleteTaskMutation, permanentlyDeleteTaskMutation, tasks, toast, session?.user])
 
   const restoreTask = async (taskId: string) => {
-    console.log("Attempting to restore task:", taskId)
-    
-    // Check if task is already in localStorage to prevent duplicates
-    const currentLocalTasks = loadLocalTasks()
-    const currentLocalTaskIds = new Set(currentLocalTasks.map(task => task.id))
-    if (currentLocalTaskIds.has(taskId)) {
-      console.log("Task is already restored")
-      return
-    }
-    
-    // Get deleted tasks from localStorage
-    const deletedTasks = getDeletedTasks()
-    const deletedItem = deletedTasks.find(item => item.task.id === taskId)
-    
-    if (!deletedItem) {
-      console.log("Task not found in deleted tasks")
-      return
-    }
-    
-    console.log("Found deleted item:", deletedItem)
+    const isAuthenticated = !!session?.user;
     
     // Clear timeout from React state
-    const queueItem = deletedTasksQueue.find(item => item.task.id === taskId)
-    if (queueItem) {
-      clearTimeout(queueItem.timeoutId)
-      setDeletedTasksQueue(prev => prev.filter(item => item.task.id !== taskId))
-    }
+    let queueItem = deletedTasksQueue.find(item => item.task.id === taskId)
     
-    // Remove from localStorage deleted tasks
-    removeDeletedTask(taskId)
-    
-    // Add task back to localStorage since it was removed during deletion
-    const updatedLocalTasks = [...currentLocalTasks, deletedItem.task]
-    saveLocalTasks(updatedLocalTasks)
-
-    // Restore task to list by reloading from localStorage to ensure consistency
-    const restoredLocalTasks = loadLocalTasks()
-    setTasks(restoredLocalTasks)
-    
-    // Show success toast
-    toast({
-      title: "Task restored",
-      description: deletedItem.task.title,
-      duration: 3000
-    })
-  }
-
-  const restoreBulkTasks = async (taskIds: string[]) => {
-    console.log("Attempting to restore bulk tasks:", taskIds)
-    
-    // Get deleted tasks from localStorage
-    const deletedTasks = getDeletedTasks()
-    const deletedItems = deletedTasks.filter(item => taskIds.includes(item.task.id))
-    
-    if (deletedItems.length === 0) {
-      console.log("No tasks found in deleted tasks")
-      return
-    }
-    
-    console.log("Found deleted items:", deletedItems)
-    
-    // Clear timeouts from React state for all tasks
-    for (const taskId of taskIds) {
-      const queueItem = deletedTasksQueue.find(item => item.task.id === taskId)
-      if (queueItem) {
-        clearTimeout(queueItem.timeoutId)
-        setDeletedTasksQueue(prev => prev.filter(item => item.task.id !== taskId))
+    // If not found in React state, check localStorage as fallback
+    if (!queueItem) {
+      const localStorageQueue = JSON.parse(localStorage.getItem('deletedTasksQueue') || '[]')
+      const localStorageItem = localStorageQueue.find((item: any) => item.task.id === taskId)
+      
+      if (localStorageItem) {
+        // Check if it's within 60 seconds
+        const now = Date.now()
+        if (now - localStorageItem.deletedAt < 60000) {
+          queueItem = { task: localStorageItem.task, timeoutId: null as any }
+        } else {
+          // Remove expired task from localStorage
+          const filteredQueue = localStorageQueue.filter((item: any) => item.task.id !== taskId)
+          localStorage.setItem('deletedTasksQueue', JSON.stringify(filteredQueue))
+          return
+        }
       }
     }
     
-    // Remove from localStorage deleted tasks
-    for (const taskId of taskIds) {
+    if (queueItem) {
+      if (queueItem.timeoutId) {
+        clearTimeout(queueItem.timeoutId)
+      }
+      setDeletedTasksQueue(prev => prev.filter(item => item.task.id !== taskId))
+      
+      // Remove from localStorage as well
+      const localStorageQueue = JSON.parse(localStorage.getItem('deletedTasksQueue') || '[]')
+      const filteredQueue = localStorageQueue.filter((item: any) => item.task.id !== taskId)
+      localStorage.setItem('deletedTasksQueue', JSON.stringify(filteredQueue))
+    }
+    
+    if (isAuthenticated) {
+      // Convex mode - restore from soft deleted state
+      const taskToRestore = queueItem?.task;
+      
+      if (!taskToRestore || !taskToRestore._id) {
+        return
+      }
+      
+      try {
+        setSyncStatus("syncing")
+        await restoreTaskMutation({ taskId: taskToRestore._id })
+        
+        // Instead of manually adding to state, let Convex query handle it
+        // The restored task will appear in convexTaskDocs and sync automatically
+        setSyncStatus("synced")
+        
+        // Show success toast
+        toast({
+          title: "Task restored",
+          description: taskToRestore.title,
+          duration: 3000
+        })
+      } catch (error) {
+        console.error("Failed to restore task:", error)
+        setSyncStatus("error")
+        toast({
+          title: "Restore Error",
+          description: "Failed to restore task from cloud.",
+          variant: "destructive",
+        })
+      }
+    } else {
+      // localStorage mode - existing logic
+      // Check if task is already in localStorage to prevent duplicates
+      const currentLocalTasks = loadLocalTasks()
+      const currentLocalTaskIds = new Set(currentLocalTasks.map(task => task.id))
+      if (currentLocalTaskIds.has(taskId)) {
+        console.log("Task is already restored")
+        return
+      }
+      
+      // Get deleted tasks from localStorage
+      const deletedTasks = getDeletedTasks()
+      const deletedItem = deletedTasks.find(item => item.task.id === taskId)
+      
+      if (!deletedItem) {
+        console.log("Task not found in deleted tasks")
+        return
+      }
+      
+      console.log("Found deleted item:", deletedItem)
+      
+      // Remove from localStorage deleted tasks
       removeDeletedTask(taskId)
-    }
-    
-    // Get current localStorage tasks to check for duplicates
-    const currentLocalTasks = loadLocalTasks()
-    const currentLocalTaskIds = new Set(currentLocalTasks.map(task => task.id))
-    
-    // Only restore tasks that are not already in localStorage
-    const restoredTasks = deletedItems
-      .map(item => item.task)
-      .filter(task => !currentLocalTaskIds.has(task.id))
-    
-    if (restoredTasks.length === 0) {
-      console.log("All tasks are already restored")
-      return
-    }
-    
-    // Add tasks back to localStorage since they were removed during deletion
-    const updatedLocalTasks = [...currentLocalTasks, ...restoredTasks]
-    saveLocalTasks(updatedLocalTasks)
+      
+      // Add task back to localStorage since it was removed during deletion
+      const updatedLocalTasks = [...currentLocalTasks, deletedItem.task]
+      saveLocalTasks(updatedLocalTasks)
 
-    // Restore tasks to list by reloading from localStorage to ensure consistency
-    const restoredLocalTasks = loadLocalTasks()
-    setTasks(restoredLocalTasks)
+      // Restore task to list by reloading from localStorage to ensure consistency
+      const restoredLocalTasks = loadLocalTasks()
+      setTasks(restoredLocalTasks)
+      
+      // Show success toast
+      toast({
+        title: "Task restored",
+        description: deletedItem.task.title,
+        duration: 3000
+      })
+    }
+  }
+
+  const restoreBulkTasks = async (taskIds: string[]) => {
+    const isAuthenticated = !!session?.user;
     
-    // Show success toast
-    toast({
-      title: "Tasks restored",
-      description: `${restoredTasks.length} task${restoredTasks.length !== 1 ? 's' : ''} restored`,
-      duration: 3000
-    })
+    // Clear timeouts from React state for all tasks
+    const tasksToRestore: Task[] = []
+    for (const taskId of taskIds) {
+      let queueItem = deletedTasksQueue.find(item => item.task.id === taskId)
+      
+      // If not found in React state, check localStorage as fallback
+      if (!queueItem) {
+        const localStorageQueue = JSON.parse(localStorage.getItem('deletedTasksQueue') || '[]')
+        const localStorageItem = localStorageQueue.find((item: any) => item.task.id === taskId)
+        
+        if (localStorageItem) {
+          const now = Date.now()
+          if (now - localStorageItem.deletedAt < 60000) {
+            queueItem = { task: localStorageItem.task, timeoutId: null as any }
+          }
+        }
+      }
+      
+      if (queueItem) {
+        if (queueItem.timeoutId) {
+          clearTimeout(queueItem.timeoutId)
+        }
+        setDeletedTasksQueue(prev => prev.filter(item => item.task.id !== taskId))
+        
+        // Remove from localStorage as well
+        const localStorageQueue = JSON.parse(localStorage.getItem('deletedTasksQueue') || '[]')
+        const filteredQueue = localStorageQueue.filter((item: any) => item.task.id !== taskId)
+        localStorage.setItem('deletedTasksQueue', JSON.stringify(filteredQueue))
+        
+        if (queueItem.task._id) {
+          tasksToRestore.push(queueItem.task)
+        }
+      }
+    }
+    
+    if (isAuthenticated) {
+      if (tasksToRestore.length === 0) {
+        return
+      }
+      
+      try {
+        setSyncStatus("syncing")
+        
+        // Restore each task
+        for (const task of tasksToRestore) {
+          await restoreTaskMutation({ taskId: task._id! })
+        }
+        
+        // Let Convex query handle updating the UI state
+        setSyncStatus("synced")
+        
+        // Show success toast
+        toast({
+          title: "Tasks restored",
+          description: `${tasksToRestore.length} task${tasksToRestore.length !== 1 ? 's' : ''} restored`,
+          duration: 3000
+        })
+      } catch (error) {
+        console.error("Failed to restore bulk tasks:", error)
+        setSyncStatus("error")
+        toast({
+          title: "Restore Error",
+          description: "Failed to restore tasks from cloud.",
+          variant: "destructive",
+        })
+      }
+    } else {
+      // localStorage mode - existing logic
+      // Get deleted tasks from localStorage
+      const deletedTasks = getDeletedTasks()
+      const deletedItems = deletedTasks.filter(item => taskIds.includes(item.task.id))
+      
+      if (deletedItems.length === 0) {
+        console.log("No tasks found in deleted tasks")
+        return
+      }
+      
+      console.log("Found deleted items:", deletedItems)
+      
+      // Remove from localStorage deleted tasks
+      for (const taskId of taskIds) {
+        removeDeletedTask(taskId)
+      }
+      
+      // Get current localStorage tasks to check for duplicates
+      const currentLocalTasks = loadLocalTasks()
+      const currentLocalTaskIds = new Set(currentLocalTasks.map(task => task.id))
+      
+      // Only restore tasks that are not already in localStorage
+      const restoredTasks = deletedItems
+        .map(item => item.task)
+        .filter(task => !currentLocalTaskIds.has(task.id))
+      
+      if (restoredTasks.length === 0) {
+        console.log("All tasks are already restored")
+        return
+      }
+      
+      // Add tasks back to localStorage since they were removed during deletion
+      const updatedLocalTasks = [...currentLocalTasks, ...restoredTasks]
+      saveLocalTasks(updatedLocalTasks)
+
+      // Restore tasks to list by reloading from localStorage to ensure consistency
+      const restoredLocalTasks = loadLocalTasks()
+      setTasks(restoredLocalTasks)
+      
+      // Show success toast
+      toast({
+        title: "Tasks restored",
+        description: `${restoredTasks.length} task${restoredTasks.length !== 1 ? 's' : ''} restored`,
+        duration: 3000
+      })
+    }
   }
 
   // Select mode functions
@@ -820,6 +1134,7 @@ export default function Home() {
     // Store selected task IDs for bulk restore
     const deletedTaskIds = selectedTasks.map(task => task.id)
     
+    setIsDeleting(true)
     // Remove all selected tasks from visible state immediately
     const updatedTasks = tasks.filter(task => !selectedTaskIds.includes(task.id))
     setTasks(updatedTasks)
@@ -837,6 +1152,7 @@ export default function Home() {
       for (const task of selectedTasks) {
         addDeletedTask(task)
       }
+      setIsDeleting(false)
     }
     
     // Set timeouts for permanent deletion
@@ -855,17 +1171,49 @@ export default function Home() {
         
         // Permanently delete from Convex if authenticated
         if (isAuthenticated && task._id) {
-          deleteTaskMutation({ taskId: task._id })
+          permanentlyDeleteTaskMutation({ taskId: task._id })
         }
       }, 60000)
       timeoutIds.push(timeoutId)
     }
     
     // Add to deleted queue for timeout management
-    setDeletedTasksQueue(prev => [
-      ...prev, 
-      ...selectedTasks.map((task, index) => ({ task, timeoutId: timeoutIds[index] }))
-    ])
+    const queueItems = selectedTasks.map((task, index) => ({ task, timeoutId: timeoutIds[index] }))
+    setDeletedTasksQueue(prev => [...prev, ...queueItems])
+    
+    // Also store in localStorage for persistence across re-renders
+    const existingQueue = JSON.parse(localStorage.getItem('deletedTasksQueue') || '[]')
+    const now = Date.now()
+    selectedTasks.forEach(task => {
+      existingQueue.push({
+        task: task,
+        deletedAt: now
+      })
+    })
+    localStorage.setItem('deletedTasksQueue', JSON.stringify(existingQueue))
+    
+    // If authenticated, soft delete all tasks
+    if (isAuthenticated) {
+      try {
+        setSyncStatus("syncing")
+        for (const task of selectedTasks) {
+          if (task._id) {
+            await deleteTaskMutation({ taskId: task._id })
+          }
+        }
+        setSyncStatus("synced")
+        setIsDeleting(false)
+      } catch (error) {
+        console.error("Failed to soft delete bulk tasks:", error)
+        setSyncStatus("error")
+        setIsDeleting(false)
+        toast({
+          title: "Delete Error",
+          description: "Failed to delete tasks from cloud.",
+          variant: "destructive",
+        })
+      }
+    }
     
     // Exit select mode
     setIsSelectMode(false)
@@ -1018,7 +1366,7 @@ export default function Home() {
           <AnimatePresence>{isFormOpen && !isMigrating && <TaskForm onSubmit={addTask} />}</AnimatePresence>
 
           {sections.map((dayInfo) => {
-            let sectionTasks = tasks.filter((t) => t.section === dayInfo.key);
+            let sectionTasks = tasks.filter((t) => t.dueDate === dayInfo.key);
             sectionTasks = sectionTasks
               .slice()
               .sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1));
