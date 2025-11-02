@@ -23,21 +23,58 @@ export const sendMagicLink = internalAction({
         await resend.emails.send({
           from: resendDomain,
           to: args.to,
-          subject: "Sign in to your Todo App",
+          subject: "Sign in to Caalm",
           html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-              <h2 style="color: #333; margin-bottom: 20px;">Sign in to your Todo App</h2>
-              <p style="color: #666; margin-bottom: 20px;">Click the button below to sign in to your account:</p>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${args.url}" style="display: inline-block; background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
-                  Sign In
-                </a>
-              </div>
-              <p style="color: #999; font-size: 14px; margin-top: 30px;">
-                This link will expire in 10 minutes.<br>
-                If you didn't request this, you can safely ignore this email.
-              </p>
-            </div>
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif; background-color: #ffffff; color: #171717; line-height: 1.5;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #ffffff; padding: 40px 20px;">
+                <tr>
+                  <td align="center">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto;">
+                      <!-- Header -->
+                      <tr>
+                        <td style="padding-bottom: 32px; text-align: center;">
+                          <h1 style="margin: 0; font-size: 24px; font-weight: 600; color: #171717; letter-spacing: -0.5px;">Caalm</h1>
+                        </td>
+                      </tr>
+                      <!-- Content -->
+                      <tr>
+                        <td style="padding-bottom: 24px;">
+                          <p style="margin: 0; font-size: 16px; color: #171717; line-height: 1.6;">Sign in to your account</p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding-bottom: 32px;">
+                          <p style="margin: 0; font-size: 14px; color: #737373; line-height: 1.5;">Click the button below to sign in. This link will expire in 10 minutes.</p>
+                        </td>
+                      </tr>
+                      <!-- CTA Button -->
+                      <tr>
+                        <td style="padding-bottom: 32px; text-align: center;">
+                          <a href="${args.url}" style="display: inline-block; height: 36px; line-height: 36px; padding: 0 16px; background-color: #171717; color: #fafafa; text-decoration: none; border-radius: 6px; font-size: 14px; font-weight: 500; text-align: center;">
+                            Sign in
+                          </a>
+                        </td>
+                      </tr>
+                      <!-- Footer -->
+                      <tr>
+                        <td style="padding-top: 32px; border-top: 1px solid #e5e5e5;">
+                          <p style="margin: 0; font-size: 12px; color: #a3a3a3; line-height: 1.4;">
+                            If you didn't request this sign-in link, you can safely ignore this email.
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </body>
+            </html>
           `,
         });
         

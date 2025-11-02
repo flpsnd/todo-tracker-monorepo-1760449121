@@ -9,6 +9,9 @@ import { CustomCheckbox } from "@/components/ui/custom-checkbox"
 import { ColorPicker } from "@/components/color-picker"
 import type { Task } from "@/app/page"
 
+const MAX_TITLE_LENGTH = 200
+const MAX_DESCRIPTION_LENGTH = 5000
+
 interface TaskCardProps {
   task: Task
   onDragStart: () => void
@@ -70,8 +73,24 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
 
   // Save the edit
   const saveEdit = () => {
-    if (editingField && editValue.trim() !== originalValue) {
-      onUpdateTask(task.id, { [editingField]: editValue.trim() })
+    if (!editingField) return
+    
+    const trimmedValue = editValue.trim()
+    
+    // Validate length
+    if (editingField === 'title' && trimmedValue.length > MAX_TITLE_LENGTH) {
+      // Don't save if too long, just cancel
+      cancelEdit()
+      return
+    }
+    if (editingField === 'description' && trimmedValue.length > MAX_DESCRIPTION_LENGTH) {
+      // Don't save if too long, just cancel
+      cancelEdit()
+      return
+    }
+    
+    if (trimmedValue !== originalValue) {
+      onUpdateTask(task.id, { [editingField]: trimmedValue })
     }
     setEditingField(null)
     setEditValue('')
@@ -223,8 +242,7 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
           // Only allow drops if user has dragged enough distance
           if (hasDraggedEnough.current) {
             const targetSection = targetSectionRef.current;
-            if (targetSection && targetSection !== task.section) {
-              console.log("Moving task", task.id, "from", task.section, "to", targetSection);
+            if (targetSection && targetSection !== task.dueDate) {
               onMoveToSection(task.id, targetSection)
             }
           }
@@ -275,11 +293,17 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
             {editingField === 'title' ? (
               <input
                 value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value
+                  if (value.length <= MAX_TITLE_LENGTH) {
+                    setEditValue(value)
+                  }
+                }}
                 onKeyDown={handleKeyDown}
                 onBlur={saveEdit}
                 className="font-mono font-medium text-black bg-transparent border-0 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none p-0 flex-1"
                 autoFocus
+                maxLength={MAX_TITLE_LENGTH}
               />
             ) : (
               <div className="flex items-center justify-between flex-1">
@@ -326,12 +350,18 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
             editingField === 'description' ? (
               <textarea
                 value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value
+                  if (value.length <= MAX_DESCRIPTION_LENGTH) {
+                    setEditValue(value)
+                  }
+                }}
                 onKeyDown={handleKeyDown}
                 onBlur={saveEdit}
                 className="font-mono text-sm text-black/80 bg-transparent border-0 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none p-0 w-full resize-none ml-8"
                 autoFocus
                 rows={2}
+                maxLength={MAX_DESCRIPTION_LENGTH}
               />
             ) : (
               <p 

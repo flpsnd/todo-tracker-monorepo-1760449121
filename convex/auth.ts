@@ -13,7 +13,7 @@ const siteUrl = process.env.TODO_SITE_URL || "http://localhost:3000";
 export const authComponent = createClient<DataModel>(
   components.betterAuth,
   {
-    verbose: true,
+    verbose: process.env.NODE_ENV === 'development',
   }
 );
 
@@ -25,7 +25,7 @@ export const createAuth = (
     baseURL: siteUrl,
     logger: {
       disabled: optionsOnly,
-      level: "debug",
+      level: process.env.NODE_ENV === 'production' ? "error" : "debug",
     },
     database: authComponent.adapter(ctx),
     emailAndPassword: {

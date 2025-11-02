@@ -2,6 +2,108 @@ import { mutation, query, MutationCtx } from "./_generated/server";
 import { v, Infer } from "convex/values";
 import { authComponent } from "./auth";
 
+const MAX_TITLE_LENGTH = 200;
+const MAX_DESCRIPTION_LENGTH = 5000;
+const MAX_TASKS_PER_USER = 10000; // Maximum tasks a user can have
+
+// Rate limiting configuration
+const RATE_LIMITS = {
+  addTask: { maxRequests: 60, windowMs: 60000 }, // 60 requests per minute
+  updateTask: { maxRequests: 120, windowMs: 60000 }, // 120 requests per minute
+  deleteTask: { maxRequests: 30, windowMs: 60000 }, // 30 requests per minute
+  syncLocalTasks: { maxRequests: 10, windowMs: 60000 }, // 10 requests per minute (bulk operation)
+};
+
+// Allowed color values (must match frontend COLORS array)
+const ALLOWED_COLORS = [
+  "#ffb3ba",
+  "#ffdfba",
+  "#ffffba",
+  "#baffc9",
+  "#bae1ff",
+  "#e0bbff",
+  "#ffffff",
+  "#000000",
+];
+
+function validateColor(color: string): void {
+  if (!ALLOWED_COLORS.includes(color.toLowerCase())) {
+    throw new Error("Invalid color value. Color must be from the allowed set.");
+  }
+}
+
+// Rate limiting helper
+async function checkRateLimit(
+  ctx: MutationCtx,
+  userEmail: string,
+  operation: keyof typeof RATE_LIMITS
+): Promise<void> {
+  const limit = RATE_LIMITS[operation];
+  if (!limit) return; // No rate limit configured for this operation
+
+  const now = Date.now();
+  const windowStart = now - (now % limit.windowMs);
+
+  // Find existing rate limit record
+  const existing = await ctx.db
+    .query("rateLimits")
+    .withIndex("by_user_operation", (q) =>
+      q.eq("userEmail", userEmail).eq("operation", operation)
+    )
+    .unique();
+
+  if (existing) {
+    // Check if we're in a new time window
+    if (existing.windowStart < windowStart) {
+      // Reset count for new window
+      await ctx.db.patch(existing._id, {
+        count: 1,
+        windowStart: windowStart,
+        updatedAt: now,
+      });
+    } else {
+      // Check if limit exceeded
+      if (existing.count >= limit.maxRequests) {
+        throw new Error(
+          `Rate limit exceeded for ${operation}. Maximum ${limit.maxRequests} requests per ${limit.windowMs / 1000} seconds.`
+        );
+      }
+      // Increment count
+      await ctx.db.patch(existing._id, {
+        count: existing.count + 1,
+        updatedAt: now,
+      });
+    }
+  } else {
+    // Create new rate limit record
+    await ctx.db.insert("rateLimits", {
+      userEmail,
+      operation,
+      count: 1,
+      windowStart: windowStart,
+      updatedAt: now,
+    });
+  }
+}
+
+// Check task count limit
+async function checkTaskLimit(
+  ctx: MutationCtx,
+  userEmail: string
+): Promise<void> {
+  const taskCount = await ctx.db
+    .query("tasks")
+    .withIndex("by_user", (q) => q.eq("userEmail", userEmail))
+    .filter((q) => q.neq(q.field("isDeleted"), true))
+    .collect();
+
+  if (taskCount.length >= MAX_TASKS_PER_USER) {
+    throw new Error(
+      `Maximum task limit reached. You can have up to ${MAX_TASKS_PER_USER} tasks. Please delete some tasks to create new ones.`
+    );
+  }
+}
+
 const taskPayloadValidator = v.object({
   clientId: v.string(),
   title: v.string(),
@@ -22,6 +124,22 @@ async function upsertTask(
   userEmail: string,
   task: TaskPayload,
 ): Promise<UpsertResult> {
+  // Validate input lengths
+  if (task.title.length > MAX_TITLE_LENGTH) {
+    throw new Error(`Title must be ${MAX_TITLE_LENGTH} characters or less`);
+  }
+  if (task.description.length > MAX_DESCRIPTION_LENGTH) {
+    throw new Error(`Description must be ${MAX_DESCRIPTION_LENGTH} characters or less`);
+  }
+  
+  // Validate color
+  validateColor(task.color);
+  
+  // Validate dueDate format (YYYY-MM-DD)
+  if (task.dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(task.dueDate)) {
+    throw new Error("dueDate must be in YYYY-MM-DD format");
+  }
+  
   const existing = await ctx.db
     .query("tasks")
     .withIndex("by_user_client", (q) =>
@@ -112,6 +230,22 @@ export const addTask = mutation({
     const user = await authComponent.safeGetAuthUser(ctx);
     if (!user) throw new Error("Not authenticated");
 
+    // Check rate limit
+    await checkRateLimit(ctx, user.email, "addTask");
+    
+    // Check task limit before adding (only check for new inserts, not updates)
+    const existingTask = await ctx.db
+      .query("tasks")
+      .withIndex("by_user_client", (q) =>
+        q.eq("userEmail", user.email).eq("clientId", args.clientId)
+      )
+      .unique();
+    
+    if (!existingTask) {
+      // Only check limit when creating a new task, not updating existing
+      await checkTaskLimit(ctx, user.email);
+    }
+
     const now = Date.now();
     const createdAt = args.createdAt ?? now;
     const updatedAt = args.updatedAt ?? now;
@@ -127,13 +261,13 @@ export const addTask = mutation({
       updatedAt,
     });
 
-    const existing = await ctx.db
+    const insertedTask = await ctx.db
       .query("tasks")
       .withIndex("by_user_client", (q) =>
         q.eq("userEmail", user.email).eq("clientId", args.clientId)
       )
       .unique();
-    return existing?._id ?? null;
+    return insertedTask?._id ?? null;
   },
 });
 
@@ -150,15 +284,39 @@ export const updateTask = mutation({
     const user = await authComponent.safeGetAuthUser(ctx);
     if (!user) throw new Error("Not authenticated");
 
+    // Check rate limit
+    await checkRateLimit(ctx, user.email, "updateTask");
+
     const existing = await ctx.db.get(args.taskId);
     if (!existing || existing.userEmail !== user.email) {
       throw new Error("Task not found");
     }
 
+    // Validate input lengths
+    const titleToUpdate = args.title ?? existing.title;
+    const descriptionToUpdate = args.description ?? existing.description;
+    
+    if (titleToUpdate.length > MAX_TITLE_LENGTH) {
+      throw new Error(`Title must be ${MAX_TITLE_LENGTH} characters or less`);
+    }
+    if (descriptionToUpdate.length > MAX_DESCRIPTION_LENGTH) {
+      throw new Error(`Description must be ${MAX_DESCRIPTION_LENGTH} characters or less`);
+    }
+    
+    // Validate color if provided
+    const colorToUpdate = args.color ?? existing.color;
+    validateColor(colorToUpdate);
+    
+    // Validate dueDate format if provided
+    const dueDateToUpdate = args.dueDate ?? existing.dueDate;
+    if (dueDateToUpdate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDateToUpdate)) {
+      throw new Error("dueDate must be in YYYY-MM-DD format");
+    }
+
     const now = Date.now();
     await ctx.db.patch(args.taskId, {
-      title: args.title ?? existing.title,
-      description: args.description ?? existing.description,
+      title: titleToUpdate,
+      description: descriptionToUpdate,
       color: args.color ?? existing.color,
       dueDate: args.dueDate ?? existing.dueDate,
       completed: args.completed ?? existing.completed,
@@ -176,6 +334,9 @@ export const deleteTask = mutation({
       const user = await authComponent.safeGetAuthUser(ctx);
       if (!user) throw new Error("Not authenticated");
 
+      // Check rate limit
+      await checkRateLimit(ctx, user.email, "deleteTask");
+
       const existing = await ctx.db.get(args.taskId);
       if (!existing || existing.userEmail !== user.email) {
         throw new Error("Task not found");
@@ -188,7 +349,13 @@ export const deleteTask = mutation({
         updatedAt: Date.now(),
       });
     } catch (error) {
-      console.error("Error in deleteTask mutation:", error);
+      // Log error with context for production debugging
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("Error in deleteTask mutation:", {
+        error: errorMessage,
+        taskId: args.taskId,
+        timestamp: Date.now(),
+      });
       throw error;
     }
   },
@@ -201,6 +368,14 @@ export const syncLocalTasks = mutation({
   handler: async (ctx, args) => {
     const user = await authComponent.safeGetAuthUser(ctx);
     if (!user) throw new Error("Not authenticated");
+
+    // Check rate limit (stricter for bulk operations)
+    await checkRateLimit(ctx, user.email, "syncLocalTasks");
+    
+    // Validate array length
+    if (args.tasks.length > 1000) {
+      throw new Error("Cannot sync more than 1000 tasks at once");
+    }
 
     let inserted = 0;
     let updated = 0;

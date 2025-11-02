@@ -11,14 +11,12 @@ async function proxy(request: Request, method: "GET" | "POST") {
 
   const convexUrl = `${CONVEX_AUTH_BASE_URL}${pathname}${url.search}`;
 
-  console.log("Auth proxy ->", method, convexUrl);
-
   const headers = new Headers(request.headers);
   headers.delete("host");
   headers.delete("content-length");
 
   let body: ReadableStream | undefined;
-  if (method !== "GET" && method !== "HEAD") {
+  if (method === "POST") {
     const arrayBuffer = await request.arrayBuffer();
     body = new ReadableStream({
       start(controller) {
@@ -28,12 +26,12 @@ async function proxy(request: Request, method: "GET" | "POST") {
     });
   }
 
-  const init: RequestInit = {
+  const init: RequestInit & { duplex?: "half" } = {
     method,
     headers,
     body,
     redirect: "manual",
-    duplex: body ? "half" : undefined,
+    ...(body && { duplex: "half" as const }),
   };
 
   const response = await fetch(convexUrl, init);
@@ -41,11 +39,6 @@ async function proxy(request: Request, method: "GET" | "POST") {
   const responseHeaders = new Headers(response.headers);
   responseHeaders.delete("content-encoding");
   responseHeaders.delete("content-length");
-
-  const setCookie = responseHeaders.get("set-cookie");
-  if (setCookie) {
-    console.log("Auth proxy <- set-cookie", setCookie);
-  }
 
   const nextResponse = new NextResponse(response.body, {
     status: response.status,

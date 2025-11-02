@@ -179,6 +179,27 @@ function createLocalTask(partial: {
   };
 }
 
+function createOnboardingTasks(): Task[] {
+  const today = formatDate(new Date());
+  return [
+    createLocalTask({
+      title: "Create new tasks",
+      description: "Click 'Add task' above to create your first task. You can add a title, description, and choose a color.",
+      color: "#baffc9", // Green
+    }),
+    createLocalTask({
+      title: "Drag to reorder",
+      description: "Click and drag tasks to reorder them within the same day, or drag them to different days to reschedule.",
+      color: "#bae1ff", // Blue
+    }),
+    createLocalTask({
+      title: "Click to edit",
+      description: "Click on a task's title or description to edit it. You can also change the color by clicking the colored circle.",
+      color: "#ffffba", // Yellow
+    }),
+  ];
+}
+
 export default function Home() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [isDragging, setIsDragging] = useState(false)
@@ -193,6 +214,7 @@ export default function Home() {
   const [pendingMigrationCount, setPendingMigrationCount] = useState(0)
   const [deletedTasksQueue, setDeletedTasksQueue] = useState<Array<{ task: Task; timeoutId: NodeJS.Timeout }>>([]);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [onboardingTasksCreated, setOnboardingTasksCreated] = useState(false);
 
   // Select mode state
   const [isSelectMode, setIsSelectMode] = useState(false)
@@ -213,15 +235,7 @@ export default function Home() {
   const isAuthenticated = hasSession
   const isLoading = isPending
   
-  // Debug auth state
-  useEffect(() => {
-    console.log("Auth state:", { session, hasSession, user: session?.user })
-    if (hasSession) {
-      console.log("User is authenticated, checking Convex auth...")
-      // Test if we can get the current user from Convex
-      // This will help us debug if the auth is properly connected
-    }
-  }, [session, hasSession])
+  // Auth state is managed by Better Auth hooks
 
   // Convex queries and mutations
   const convexTaskDocs = useQuery(api.tasks.getTasks) as Doc<"tasks">[] | undefined
@@ -259,6 +273,35 @@ export default function Home() {
       const shouldSync = tasks.length === 0 || convexTaskDocs.length > tasks.length;
       
       if (shouldSync) {
+        // If no tasks from Convex and onboarding tasks haven't been created yet, create them
+        if (convexTaskDocs.length === 0 && !onboardingTasksCreated) {
+          const onboardingTasks = createOnboardingTasks();
+          setTasks(onboardingTasks);
+          setOnboardingTasksCreated(true);
+          // Save onboarding tasks to Convex
+          Promise.all(
+            onboardingTasks.map(async (task) => {
+              try {
+                await addTaskMutation({
+                  clientId: task.clientId,
+                  title: task.title,
+                  description: task.description,
+                  color: task.color,
+                  dueDate: task.dueDate,
+                  completed: task.completed,
+                  createdAt: task.createdAt,
+                  updatedAt: task.updatedAt,
+                });
+              } catch (error) {
+                console.error("Failed to add onboarding task:", error);
+              }
+            })
+          ).catch((error) => {
+            console.error("Failed to create onboarding tasks:", error);
+          });
+          return;
+        }
+
         const convexTasks: Task[] = convexTaskDocs.map(doc => {
           // Handle migration from section to dueDate
           let dueDate = doc.dueDate;
@@ -289,7 +332,7 @@ export default function Home() {
         setTasks(convexTasks);
       }
     }
-  }, [isAuthenticated, convexTaskDocs, isMigrating, hasInitialized, tasks.length, isDeleting]);
+  }, [isAuthenticated, convexTaskDocs, isMigrating, hasInitialized, tasks.length, isDeleting, addTaskMutation]);
 
   // Initialize app with local-first logic
   useEffect(() => {
@@ -301,7 +344,14 @@ export default function Home() {
     // Only load local tasks if not authenticated (to avoid overriding Convex data)
     if (!isAuthenticated) {
       const localTasks = loadLocalTasks().map(ensureLocalTask)
-      setTasks(localTasks)
+      // If no tasks, show onboarding tasks
+      if (localTasks.length === 0) {
+        const onboardingTasks = createOnboardingTasks()
+        setTasks(onboardingTasks)
+        saveLocalTasks(onboardingTasks)
+      } else {
+        setTasks(localTasks)
+      }
     }
     // If authenticated, don't set any tasks here - let the sync effect handle it
     setHasInitialized(true)
@@ -354,7 +404,6 @@ export default function Home() {
       }),
     })
       .then((result) => {
-        console.log("Migration result", result)
         clearLocalTasks()
         localStorage.setItem(migrationFlagKey, "true")
         setIsMigrating(false)
@@ -391,8 +440,6 @@ export default function Home() {
       );
       
       if (overdueTasks.length > 0) {
-        console.log(`Found ${overdueTasks.length} overdue tasks, migrating to today`);
-        
         const isAuthenticated = !!session?.user;
         
         // Update tasks to today's date
@@ -524,7 +571,6 @@ export default function Home() {
         newOrderIds.every((id) => prevIds.includes(id));
 
       if (!sameMembership) {
-        console.log("Skipping updateTaskOrder - membership changed");
         return;
       }
 
@@ -571,19 +617,15 @@ export default function Home() {
   );
 
   const moveTaskToSection = useCallback(async (taskId: string, targetDueDate: string) => {
-    console.log("moveTaskToSection called with:", { taskId, targetDueDate });
     const isAuthenticated = !!session?.user;
-    console.log("isAuthenticated:", isAuthenticated);
     
     // Find the task before updating state to avoid async issues
     const taskToMove = tasks.find(task => task.id === taskId);
     if (!taskToMove) {
-      console.error("Task not found:", taskId);
       return;
     }
     
     const movedTask: Task = { ...taskToMove, dueDate: targetDueDate };
-    console.log("Found and updated task:", movedTask);
     
     setTasks((prev) => {
       const next = prev.map((task) => {
@@ -601,21 +643,14 @@ export default function Home() {
       return next
     })
 
-    console.log("After setTasks - movedTask:", movedTask);
-    console.log("movedTask._id:", movedTask._id);
-
     if (isAuthenticated && movedTask) {
       if (movedTask._id) {
         try {
           setSyncStatus("syncing")
-          console.log("Syncing to Convex:", { taskId: movedTask._id, dueDate: targetDueDate });
-          console.log("movedTask object:", JSON.stringify(movedTask, null, 2));
-          console.log("About to call updateTaskMutation...");
-          const result = await updateTaskMutation({
+          await updateTaskMutation({
             taskId: movedTask._id,
             dueDate: targetDueDate,
           })
-          console.log("updateTaskMutation result:", result);
           setSyncStatus("synced")
         } catch (error) {
           console.error("Failed to sync task move:", error)
@@ -627,7 +662,6 @@ export default function Home() {
           })
         }
       } else {
-        console.log("Task has no _id, creating new task in Convex");
         try {
           setSyncStatus("syncing")
           const insertedId = await addTaskMutation({
@@ -655,8 +689,6 @@ export default function Home() {
           })
         }
       }
-    } else {
-      console.log("Not syncing to Convex - isAuthenticated:", isAuthenticated, "movedTask:", !!movedTask);
     }
   }, [session?.user, updateTaskMutation, toast, addTaskMutation, tasks])
 
@@ -666,7 +698,6 @@ export default function Home() {
     // Find the task before updating state to avoid async issues
     const taskToToggle = tasks.find(task => task.id === taskId);
     if (!taskToToggle) {
-      console.error("Task not found:", taskId);
       return;
     }
     
@@ -946,7 +977,6 @@ export default function Home() {
       const currentLocalTasks = loadLocalTasks()
       const currentLocalTaskIds = new Set(currentLocalTasks.map(task => task.id))
       if (currentLocalTaskIds.has(taskId)) {
-        console.log("Task is already restored")
         return
       }
       
@@ -955,11 +985,8 @@ export default function Home() {
       const deletedItem = deletedTasks.find(item => item.task.id === taskId)
       
       if (!deletedItem) {
-        console.log("Task not found in deleted tasks")
         return
       }
-      
-      console.log("Found deleted item:", deletedItem)
       
       // Remove from localStorage deleted tasks
       removeDeletedTask(taskId)
@@ -1042,7 +1069,6 @@ export default function Home() {
           duration: 3000
         })
       } catch (error) {
-        console.error("Failed to restore bulk tasks:", error)
         setSyncStatus("error")
         toast({
           title: "Restore Error",
@@ -1057,11 +1083,8 @@ export default function Home() {
       const deletedItems = deletedTasks.filter(item => taskIds.includes(item.task.id))
       
       if (deletedItems.length === 0) {
-        console.log("No tasks found in deleted tasks")
         return
       }
-      
-      console.log("Found deleted items:", deletedItems)
       
       // Remove from localStorage deleted tasks
       for (const taskId of taskIds) {
@@ -1078,7 +1101,6 @@ export default function Home() {
         .filter(task => !currentLocalTaskIds.has(task.id))
       
       if (restoredTasks.length === 0) {
-        console.log("All tasks are already restored")
         return
       }
       
@@ -1341,16 +1363,13 @@ export default function Home() {
             >
               <div className="flex items-center gap-2">
                 {session?.user ? (
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm text-muted-foreground">{session.user.email}</span>
-                    <button
-                      onClick={() => signOut()}
-                      className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm"
-                      disabled={isMigrating}
-                    >
-                      Sign out
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => signOut()}
+                    className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm"
+                    disabled={isMigrating}
+                  >
+                    Sign out
+                  </button>
                 ) : (
                   <SignInDialog>
                     <button className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm">

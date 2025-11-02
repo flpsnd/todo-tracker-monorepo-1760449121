@@ -37,7 +37,14 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error("ErrorBoundary caught an error:", error, errorInfo);
+    // Structured error logging for production debugging
+    const errorDetails = {
+      message: error.message,
+      stack: error.stack,
+      componentStack: errorInfo.componentStack,
+      timestamp: new Date().toISOString(),
+    };
+    console.error("ErrorBoundary caught an error:", errorDetails);
     this.props.onError?.(error, errorInfo);
   }
 
@@ -118,7 +125,13 @@ export function useConvexErrorHandler() {
   const [retryCount, setRetryCount] = React.useState(0);
 
   const handleError = React.useCallback((error: Error) => {
-    console.error("Convex query error:", error);
+    // Structured error logging
+    const errorDetails = {
+      message: error.message,
+      stack: error.stack,
+      timestamp: new Date().toISOString(),
+    };
+    console.error("Convex query error:", errorDetails);
     setError(error);
   }, []);
 

@@ -86,4 +86,13 @@ export default defineSchema({
     referrer: v.optional(v.string()),
     createdAt: v.number(),
   }).index("email", ["email"]),
+
+  // Rate limiting table for tracking mutation counts
+  rateLimits: defineTable({
+    userEmail: v.string(),
+    operation: v.string(), // e.g., "addTask", "syncLocalTasks", "updateTask"
+    count: v.number(),
+    windowStart: v.number(), // Timestamp of the start of the rate limit window
+    updatedAt: v.number(),
+  }).index("by_user_operation", ["userEmail", "operation"]),
 });

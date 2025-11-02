@@ -14,24 +14,69 @@ interface TaskFormProps {
   onSubmit: (task: { title: string; description: string; color: string }) => void
 }
 
+const MAX_TITLE_LENGTH = 200
+const MAX_DESCRIPTION_LENGTH = 5000
+
 export function TaskForm({ onSubmit }: TaskFormProps) {
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [selectedColor, setSelectedColor] = useState(COLORS[0].value)
+  const [titleError, setTitleError] = useState("")
+  const [descriptionError, setDescriptionError] = useState("")
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!title.trim()) return
+    
+    // Reset errors
+    setTitleError("")
+    setDescriptionError("")
+    
+    // Validation
+    const trimmedTitle = title.trim()
+    if (!trimmedTitle) {
+      setTitleError("Title is required")
+      return
+    }
+    
+    if (trimmedTitle.length > MAX_TITLE_LENGTH) {
+      setTitleError(`Title must be ${MAX_TITLE_LENGTH} characters or less`)
+      return
+    }
+    
+    if (description.length > MAX_DESCRIPTION_LENGTH) {
+      setDescriptionError(`Description must be ${MAX_DESCRIPTION_LENGTH} characters or less`)
+      return
+    }
 
     onSubmit({
-      title,
-      description,
+      title: trimmedTitle,
+      description: description.trim(),
       color: selectedColor,
     })
 
     setTitle("")
     setDescription("")
     setSelectedColor(COLORS[0].value)
+  }
+  
+  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    if (value.length <= MAX_TITLE_LENGTH) {
+      setTitle(value)
+      setTitleError("")
+    } else {
+      setTitleError(`Title must be ${MAX_TITLE_LENGTH} characters or less`)
+    }
+  }
+  
+  const handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value
+    if (value.length <= MAX_DESCRIPTION_LENGTH) {
+      setDescription(value)
+      setDescriptionError("")
+    } else {
+      setDescriptionError(`Description must be ${MAX_DESCRIPTION_LENGTH} characters or less`)
+    }
   }
 
   return (
@@ -52,11 +97,15 @@ export function TaskForm({ onSubmit }: TaskFormProps) {
             <Input
               id="title"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={handleTitleChange}
               placeholder="Enter task title"
               className="font-mono text-base"
-              style={{ fontSize: '16px' }}
+              style={{ fontSize: '14px' }}
+              maxLength={MAX_TITLE_LENGTH}
             />
+            {titleError && (
+              <p className="text-xs text-red-600 font-mono">{titleError}</p>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -66,12 +115,16 @@ export function TaskForm({ onSubmit }: TaskFormProps) {
             <Textarea
               id="description"
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={handleDescriptionChange}
               placeholder="Enter task description"
               className="min-h-12 resize-none font-mono text-base"
-              style={{ fontSize: '16px' }}
+              style={{ fontSize: '14px' }}
               rows={2}
+              maxLength={MAX_DESCRIPTION_LENGTH}
             />
+            {descriptionError && (
+              <p className="text-xs text-red-600 font-mono">{descriptionError}</p>
+            )}
           </div>
 
           <Button type="submit" className="px-4 py-2 font-mono text-sm flex items-center gap-2">

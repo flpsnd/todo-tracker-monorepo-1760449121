@@ -135,7 +135,7 @@ export function TaskSection({
           <TaskCard
             key={task.id}
             task={task}
-            onDragStart={() => onDragStart(task.section)}
+            onDragStart={() => onDragStart(section)}
             onDragEnd={onDragEnd}
             onMoveToSection={onMoveToSection}
             onToggleCompletion={onToggleCompletion}

@@ -1,4 +1,5 @@
 import type { Task } from "@/app/page";
+import type { Id } from "@/convex/_generated/dataModel";
 
 const STORAGE_KEY = "todo-tasks-local";
 const DELETED_TASKS_KEY = "todo-deleted-tasks";
@@ -18,7 +19,7 @@ function rebuildTask(task: PlainTask): Task {
     clientId: task.clientId,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
-    _id: task._id,
+    _id: task._id ? (task._id as Id<"tasks">) : undefined,
   };
 }
 
@@ -77,7 +78,7 @@ export function replaceTaskIds(tasks: Task[], replacements: Record<string, strin
     return {
       ...task,
       id: newId,
-      _id: newId,
+      _id: newId as Id<"tasks">,
     };
   });
   saveLocalTasks(updated);
