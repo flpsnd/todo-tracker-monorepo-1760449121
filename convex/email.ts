@@ -58,7 +58,7 @@ export const sendMagicLink = internalAction({
                         <td style="padding-bottom: 32px; text-align: center;">
                           <a href="${args.url}" style="display: inline-block; height: 36px; line-height: 36px; padding: 0 16px; background-color: #171717; color: #fafafa; text-decoration: none; border-radius: 6px; font-size: 14px; font-weight: 500; text-align: center;">
                             Sign in
-                          </a>
+                </a>
                         </td>
                       </tr>
                       <!-- Footer -->
@@ -66,7 +66,7 @@ export const sendMagicLink = internalAction({
                         <td style="padding-top: 32px; border-top: 1px solid #e5e5e5;">
                           <p style="margin: 0; font-size: 12px; color: #a3a3a3; line-height: 1.4;">
                             If you didn't request this sign-in link, you can safely ignore this email.
-                          </p>
+              </p>
                         </td>
                       </tr>
                     </table>

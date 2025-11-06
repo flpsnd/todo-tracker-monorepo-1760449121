@@ -151,7 +151,11 @@ export function TaskSection({
       {tasks.length === 0 && (
         <div className="rounded-lg border-2 border-dashed border-border p-8 text-center">
           <p className="font-mono text-sm text-muted-foreground">
-            {isDragging && isHovered ? "Drop task here" : "No tasks yet"}
+            {isDragging
+              ? isHovered
+                ? "Drop to schedule here"
+                : "Drag a task here to schedule it"
+              : "No tasks yet — drag a task here when you're ready"}
           </p>
         </div>
       )}

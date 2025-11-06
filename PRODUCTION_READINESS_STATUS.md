@@ -137,3 +137,8 @@
 - The app is functionally ready but needs error tracking and final testing
 - Consider launching v1.0 with current state, then adding monitoring/testing in v1.1
 
+
+
+
+
+

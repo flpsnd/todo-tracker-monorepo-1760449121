@@ -100,7 +100,7 @@ export function TaskForm({ onSubmit }: TaskFormProps) {
               onChange={handleTitleChange}
               placeholder="Enter task title"
               className="font-mono text-base"
-              style={{ fontSize: '14px' }}
+              style={{ fontSize: '16px' }}
               maxLength={MAX_TITLE_LENGTH}
             />
             {titleError && (
@@ -118,7 +118,7 @@ export function TaskForm({ onSubmit }: TaskFormProps) {
               onChange={handleDescriptionChange}
               placeholder="Enter task description"
               className="min-h-12 resize-none font-mono text-base"
-              style={{ fontSize: '14px' }}
+              style={{ fontSize: '16px' }}
               rows={2}
               maxLength={MAX_DESCRIPTION_LENGTH}
             />

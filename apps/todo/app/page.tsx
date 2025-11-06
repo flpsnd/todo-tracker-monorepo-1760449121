@@ -350,7 +350,7 @@ export default function Home() {
         setTasks(onboardingTasks)
         saveLocalTasks(onboardingTasks)
       } else {
-        setTasks(localTasks)
+      setTasks(localTasks)
       }
     }
     // If authenticated, don't set any tasks here - let the sync effect handle it
@@ -855,6 +855,14 @@ export default function Home() {
       saveLocalTasks(filteredTasks)
       addDeletedTask(taskToDelete)
       setIsDeleting(false)
+      
+      // Show toast with restore action for localStorage mode
+      toast({
+        title: "Task deleted",
+        description: taskToDelete.title,
+        action: <ToastAction altText="Restore" onClick={() => restoreTask(taskId)}>Restore</ToastAction>,
+        duration: 60000
+      })
     }
     
     if (isAuthenticated && taskToDelete._id) {
@@ -1363,13 +1371,13 @@ export default function Home() {
             >
               <div className="flex items-center gap-2">
                 {session?.user ? (
-                  <button
-                    onClick={() => signOut()}
-                    className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm"
-                    disabled={isMigrating}
-                  >
-                    Sign out
-                  </button>
+                    <button
+                      onClick={() => signOut()}
+                      className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm"
+                      disabled={isMigrating}
+                    >
+                      Sign out
+                    </button>
                 ) : (
                   <SignInDialog>
                     <button className="rounded-lg border border-border p-2 hover:bg-accent transition-colors font-mono text-sm">
@@ -1470,11 +1478,11 @@ export default function Home() {
                     />
                     <button
                       onClick={cancelSelectMode}
-                      className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm bg-background"
+                      className="rounded-lg border border-border p-2 md:pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm bg-background"
                       disabled={isMigrating}
                     >
                       <X className="h-4 w-4" />
-                      Cancel
+                      <span className="hidden md:inline">Cancel</span>
                     </button>
                   </div>
                 ) : (
@@ -1490,7 +1498,9 @@ export default function Home() {
               </div>
               <button
                 onClick={() => setShowCompleted(!showCompleted)}
-                className="rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2"
+                className={`rounded-lg border border-border p-2 pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 ${
+                  isSelectMode ? "hidden md:flex" : ""
+                }`}
                 aria-label="Toggle completed tasks visibility"
                 disabled={isMigrating}
               >

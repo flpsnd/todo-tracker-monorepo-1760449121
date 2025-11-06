@@ -1,16 +1,14 @@
 "use client"
 
 import { Reorder, useMotionValue } from "framer-motion"
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { Trash2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { CustomCheckbox } from "@/components/ui/custom-checkbox"
 import { ColorPicker } from "@/components/color-picker"
+import { COLORS } from "@/lib/colors"
 import type { Task } from "@/app/page"
-
-const MAX_TITLE_LENGTH = 200
-const MAX_DESCRIPTION_LENGTH = 5000
 
 interface TaskCardProps {
   task: Task
@@ -44,13 +42,22 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
   // Color picker dropdown state
   const [isColorPickerOpen, setIsColorPickerOpen] = useState(false)
   
+  // Get text color based on task background color
+  const textColor = useMemo(() => {
+    const colorConfig = COLORS.find(c => c.value.toLowerCase() === task.color.toLowerCase())
+    return colorConfig?.textColor || "#000000"
+  }, [task.color])
+  
   // Throttle drag detection to improve performance
   const lastDetectionTime = useRef(0)
   const THROTTLE_MS = 16 // ~60fps
   
   // Auto-scroll when dragging near edges
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const isScrolling = useRef(false)
+  const scrollAnimationFrameRef = useRef<number | null>(null)
+  const isDraggingRef = useRef(false)
+  const pointerClientY = useRef<number | null>(null)
+  const pointerMoveHandlerRef = useRef<((event: PointerEvent) => void) | null>(null)
+  const touchMoveHandlerRef = useRef<((event: TouchEvent) => void) | null>(null)
   
   // Track drag start position to prevent accidental drops
   const dragStartPosition = useRef<{ x: number; y: number } | null>(null)
@@ -61,7 +68,7 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
   
   // Scroll configuration
   const SCROLL_THRESHOLD = 120 // pixels from edge to trigger scroll
-  const SCROLL_AMOUNT = 70 // pixels to scroll per trigger
+  const SCROLL_AMOUNT = 8 // pixels to scroll per frame (reduced for smoother continuous scroll)
 
   // Start editing a field
   const startEditing = (field: 'title' | 'description') => {
@@ -73,24 +80,8 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
 
   // Save the edit
   const saveEdit = () => {
-    if (!editingField) return
-    
-    const trimmedValue = editValue.trim()
-    
-    // Validate length
-    if (editingField === 'title' && trimmedValue.length > MAX_TITLE_LENGTH) {
-      // Don't save if too long, just cancel
-      cancelEdit()
-      return
-    }
-    if (editingField === 'description' && trimmedValue.length > MAX_DESCRIPTION_LENGTH) {
-      // Don't save if too long, just cancel
-      cancelEdit()
-      return
-    }
-    
-    if (trimmedValue !== originalValue) {
-      onUpdateTask(task.id, { [editingField]: trimmedValue })
+    if (editingField && editValue.trim() !== originalValue) {
+      onUpdateTask(task.id, { [editingField]: editValue.trim() })
     }
     setEditingField(null)
     setEditValue('')
@@ -121,70 +112,120 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
     sectionsCache.current = Array.from(document.querySelectorAll("[data-section]"))
   }, [])
 
+  const getScrollDirection = useCallback(() => {
+    if (!isDraggingRef.current) {
+      return 0
+    }
+
+    const viewportHeight = window.innerHeight
+    const pointerY = pointerClientY.current
+
+    if (pointerY !== null) {
+      if (pointerY < SCROLL_THRESHOLD) return -1
+      if (pointerY > viewportHeight - SCROLL_THRESHOLD) return 1
+      return 0
+    }
+
+    if (cardRef.current) {
+      const cardRect = cardRef.current.getBoundingClientRect()
+      const cardCenterY = cardRect.top + cardRect.height / 2
+      if (cardCenterY < SCROLL_THRESHOLD) return -1
+      if (cardCenterY > viewportHeight - SCROLL_THRESHOLD) return 1
+    }
+
+    return 0
+  }, [])
+
+  // Continuous scroll function using requestAnimationFrame
+  // Based on research: Don't adjust motion value - let Framer Motion handle drag naturally
+  // Just handle the scroll, Framer Motion will track pointer position automatically
+  const performContinuousScroll = useCallback(() => {
+    if (!isDraggingRef.current) {
+      isAutoScrolling.current = false
+      scrollAnimationFrameRef.current = null
+      return
+    }
+
+    const direction = getScrollDirection()
+
+    if (direction === 0) {
+      isAutoScrolling.current = false
+      scrollAnimationFrameRef.current = null
+      return
+    }
+
+    isAutoScrolling.current = true
+    
+    // Simply scroll - Framer Motion will handle keeping the card under the pointer
+    // The key is that we're using pointer/touch position, not card position
+    window.scrollBy({
+      top: direction * SCROLL_AMOUNT,
+      behavior: 'auto'
+    })
+
+    scrollAnimationFrameRef.current = requestAnimationFrame(performContinuousScroll)
+  }, [getScrollDirection])
+
+  // Function to check scroll zone and start/stop scrolling
+  // This is called frequently, so it needs to be lightweight and efficient
+  const checkScrollZone = useCallback(() => {
+    if (!isDraggingRef.current) {
+      // If not dragging, ensure scroll is stopped
+      if (scrollAnimationFrameRef.current) {
+        cancelAnimationFrame(scrollAnimationFrameRef.current)
+        scrollAnimationFrameRef.current = null
+        isAutoScrolling.current = false
+      }
+      return
+    }
+
+    const direction = getScrollDirection()
+
+    if (direction !== 0) {
+      // Need to scroll - start the loop if not already running
+      isAutoScrolling.current = true
+      if (!scrollAnimationFrameRef.current) {
+        scrollAnimationFrameRef.current = requestAnimationFrame(performContinuousScroll)
+      }
+    } else {
+      // Not in scroll zone - stop scrolling if it's running
+      if (scrollAnimationFrameRef.current) {
+        cancelAnimationFrame(scrollAnimationFrameRef.current)
+        scrollAnimationFrameRef.current = null
+        isAutoScrolling.current = false
+      }
+    }
+  }, [getScrollDirection, performContinuousScroll])
+
   useEffect(() => {
     // Update cache when component mounts
     updateSectionsCache()
     
-      const unsubscribe = y.on("change", (latest) => {
-        // Update cache on every drag movement to catch newly rendered sections
-        updateSectionsCache()
-        if (!cardRef.current) return
+    const unsubscribe = y.on("change", (latest) => {
+      // Update cache on every drag movement to catch newly rendered sections
+      updateSectionsCache()
+      if (!cardRef.current) return
 
-        // Check if user has dragged enough distance (minimum 20px)
-        if (dragStartPosition.current) {
-          const currentY = latest
-          const dragDistance = Math.abs(currentY - dragStartPosition.current.y)
-          if (dragDistance > 20) {
-            hasDraggedEnough.current = true
-          }
+      // Check if user has dragged enough distance (minimum 20px)
+      if (dragStartPosition.current) {
+        const currentY = latest
+        const dragDistance = Math.abs(currentY - dragStartPosition.current.y)
+        if (dragDistance > 20) {
+          hasDraggedEnough.current = true
         }
-
-        // Throttle the detection to improve performance
-        const now = Date.now()
-        if (now - lastDetectionTime.current < THROTTLE_MS) return
-        lastDetectionTime.current = now
-
-        const cardRect = cardRef.current.getBoundingClientRect()
-        const sections = sectionsCache.current
-
-
-      // Auto-scroll when dragging near top or bottom of viewport
-      const viewportHeight = window.innerHeight
-      const cardTop = cardRect.top
-      const cardBottom = cardRect.bottom
-      
-      // Determine if we should scroll
-      const shouldScrollUp = cardTop < SCROLL_THRESHOLD
-      const shouldScrollDown = cardBottom > viewportHeight - SCROLL_THRESHOLD
-      
-      if (shouldScrollUp || shouldScrollDown) {
-        // Set auto-scroll flag to prevent section detection during scroll
-        isAutoScrolling.current = true
-        
-        // Clear any existing timeout to prevent conflicts
-        if (scrollTimeoutRef.current) {
-          clearTimeout(scrollTimeoutRef.current)
-        }
-        
-        // Execute scroll immediately (no setTimeout wrapper)
-        const scrollDirection = shouldScrollUp ? -1 : 1
-        window.scrollBy({
-          top: scrollDirection * SCROLL_AMOUNT,
-          behavior: 'auto' // Use auto instead of smooth for better mobile performance
-        })
-        
-        // Reset auto-scroll flag after a minimal delay to allow scroll to process
-        scrollTimeoutRef.current = setTimeout(() => {
-          isAutoScrolling.current = false
-        }, 50) // 50ms is enough for the scroll to be processed
-      } else {
-        // Not in scroll zone - clear any pending scroll operations
-        if (scrollTimeoutRef.current) {
-          clearTimeout(scrollTimeoutRef.current)
-          scrollTimeoutRef.current = null
-        }
-        isAutoScrolling.current = false
       }
+
+      // CRITICAL: Always check scroll zone - don't throttle this
+      // This ensures the scroll loop starts/stops correctly even during rapid motion value changes
+      checkScrollZone()
+
+      // Throttle the section detection to improve performance
+      const now = Date.now()
+      if (now - lastDetectionTime.current < THROTTLE_MS) return
+      lastDetectionTime.current = now
+
+      const cardRect = cardRef.current.getBoundingClientRect()
+      const sections = sectionsCache.current
 
       // Skip section detection during auto-scroll to prevent conflicts
       if (!isAutoScrolling.current) {
@@ -211,11 +252,28 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
 
     return () => {
       unsubscribe()
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current)
+
+      if (scrollAnimationFrameRef.current) {
+        cancelAnimationFrame(scrollAnimationFrameRef.current)
+        scrollAnimationFrameRef.current = null
       }
+
+      if (pointerMoveHandlerRef.current) {
+        document.removeEventListener('pointermove', pointerMoveHandlerRef.current)
+        pointerMoveHandlerRef.current = null
+      }
+
+      if (touchMoveHandlerRef.current) {
+        document.removeEventListener('touchmove', touchMoveHandlerRef.current)
+        touchMoveHandlerRef.current = null
+      }
+
+      isDraggingRef.current = false
+      isAutoScrolling.current = false
+      pointerClientY.current = null
     }
-  }, [y, updateSectionsCache])
+  }, [y, updateSectionsCache, performContinuousScroll, checkScrollZone])
+
 
   return (
     <Reorder.Item
@@ -224,18 +282,56 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
       onDragStart={isSelectMode ? undefined : (event, info) => {
         dragStartPosition.current = { x: info.point.x, y: info.point.y }
         hasDraggedEnough.current = false
+        isDraggingRef.current = true
+        pointerClientY.current = info.point.y
+
+        // Add pointer listener to track pointer position during drag
+        pointerMoveHandlerRef.current = (pointerEvent: PointerEvent) => {
+          if (!isDraggingRef.current) return
+          pointerClientY.current = pointerEvent.clientY
+          checkScrollZone()
+        }
+        document.addEventListener('pointermove', pointerMoveHandlerRef.current)
+
+        // Add touch listener specifically for touch devices (older browsers without pointer events)
+        touchMoveHandlerRef.current = (touchEvent: TouchEvent) => {
+          if (!isDraggingRef.current) return
+          const touch = touchEvent.touches[0]
+          pointerClientY.current = touch ? touch.clientY : null
+          checkScrollZone()
+        }
+        document.addEventListener('touchmove', touchMoveHandlerRef.current, { passive: true })
+
+        // Immediately check scroll zone in case we start near an edge
+        checkScrollZone()
+
         onDragStart()
       }}
         onDragEnd={isSelectMode ? undefined : () => {
-          // Clear any pending scroll timeout
-          if (scrollTimeoutRef.current) {
-            clearTimeout(scrollTimeoutRef.current)
-            scrollTimeoutRef.current = null
+          // Stop dragging
+          isDraggingRef.current = false
+          pointerClientY.current = null
+
+          // Remove pointer event listener
+          if (pointerMoveHandlerRef.current) {
+            document.removeEventListener('pointermove', pointerMoveHandlerRef.current)
+            pointerMoveHandlerRef.current = null
           }
-          
+
+          // Remove touch event listener
+          if (touchMoveHandlerRef.current) {
+            document.removeEventListener('touchmove', touchMoveHandlerRef.current)
+            touchMoveHandlerRef.current = null
+          }
+
+          // Stop continuous scrolling
+          if (scrollAnimationFrameRef.current) {
+            cancelAnimationFrame(scrollAnimationFrameRef.current)
+            scrollAnimationFrameRef.current = null
+          }
+
           // Reset auto-scroll flags
           isAutoScrolling.current = false
-          isScrolling.current = false
           
           onDragEnd()
 
@@ -243,6 +339,7 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
           if (hasDraggedEnough.current) {
             const targetSection = targetSectionRef.current;
             if (targetSection && targetSection !== task.dueDate) {
+              console.log("Moving task", task.id, "from", task.dueDate, "to", targetSection);
               onMoveToSection(task.id, targetSection)
             }
           }
@@ -254,6 +351,8 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
         }}
       style={{ y }}
       className={isSelectMode ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}
+      // Apply touch-action via CSS to prevent native scrolling interference
+      // This is critical for mobile drag-and-drop to work properly
       whileDrag={isSelectMode ? {} : {
         scale: 1.02,
         boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
@@ -265,10 +364,13 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
           task.completed ? "opacity-30" : "opacity-100"
         } ${
           isSelectMode 
-            ? `cursor-pointer hover:scale-[1.02] ${isSelected ? "ring-2 ring-red-500 ring-offset-2" : ""}` 
+            ? `cursor-pointer hover:scale-[1.02] ${isSelected ? "ring-2 ring-black dark:ring-white ring-offset-2" : ""}` 
             : ""
         }`}
-        style={{ backgroundColor: task.color }}
+        style={{ 
+          backgroundColor: task.color,
+          touchAction: isSelectMode ? undefined : 'none' // Critical: prevents native touch scrolling interference
+        }}
         onClick={isSelectMode ? () => onSelect?.(task.id) : undefined}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
@@ -293,25 +395,34 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
             {editingField === 'title' ? (
               <input
                 value={editValue}
-                onChange={(e) => {
-                  const value = e.target.value
-                  if (value.length <= MAX_TITLE_LENGTH) {
-                    setEditValue(value)
-                  }
-                }}
+                onChange={(e) => setEditValue(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onBlur={saveEdit}
-                className="font-mono font-medium text-black bg-transparent border-0 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none p-0 flex-1"
+                className="font-mono font-medium bg-transparent border-0 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none p-0 flex-1"
+                style={{ color: textColor }}
                 autoFocus
-                maxLength={MAX_TITLE_LENGTH}
               />
             ) : (
               <div className="flex items-center justify-between flex-1">
                 <h3 
-                  className={`font-mono font-medium text-black cursor-pointer hover:bg-black/5 rounded px-1 py-0.5 transition-colors ${
+                  className={`font-mono font-medium cursor-pointer rounded px-1 py-0.5 transition-colors ${
                     task.completed ? "line-through" : ""
                   }`}
-                  onClick={() => startEditing('title')}
+                  style={{ 
+                    color: textColor,
+                    ...(textColor === "#000000" ? { "--hover-bg": "rgba(0,0,0,0.05)" } : { "--hover-bg": "rgba(255,255,255,0.1)" })
+                  }}
+                  onMouseEnter={(e) => {
+                    if (textColor === "#000000") {
+                      e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.05)"
+                    } else {
+                      e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.1)"
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = "transparent"
+                  }}
+                  onClick={isSelectMode ? undefined : () => startEditing('title')}
                 >
                   {task.title}
                 </h3>
@@ -335,9 +446,25 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
                         e.stopPropagation()
                         onDelete(task.id)
                       }}
-                      className="h-5 w-5 flex items-center justify-center hover:bg-black/10 rounded transition-colors"
+                      className="h-5 w-5 flex items-center justify-center rounded transition-colors"
+                      style={{ 
+                        color: textColor,
+                        ...(textColor === "#000000" 
+                          ? { "--hover-bg": "rgba(0,0,0,0.1)" } 
+                          : { "--hover-bg": "rgba(255,255,255,0.2)" })
+                      }}
+                      onMouseEnter={(e) => {
+                        if (textColor === "#000000") {
+                          e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.1)"
+                        } else {
+                          e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.2)"
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = "transparent"
+                      }}
                     >
-                      <Trash2 className="h-4 w-4 text-black" />
+                      <Trash2 className="h-4 w-4" style={{ color: textColor }} />
                     </button>
                   </div>
                 )}
@@ -350,25 +477,35 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
             editingField === 'description' ? (
               <textarea
                 value={editValue}
-                onChange={(e) => {
-                  const value = e.target.value
-                  if (value.length <= MAX_DESCRIPTION_LENGTH) {
-                    setEditValue(value)
-                  }
-                }}
+                onChange={(e) => setEditValue(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onBlur={saveEdit}
-                className="font-mono text-sm text-black/80 bg-transparent border-0 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none p-0 w-full resize-none ml-8"
+                className="font-mono text-sm bg-transparent border-0 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none p-0 w-full resize-none ml-8"
+                style={{ color: textColor, opacity: 0.8 }}
                 autoFocus
                 rows={2}
-                maxLength={MAX_DESCRIPTION_LENGTH}
               />
             ) : (
               <p 
-                className={`font-mono text-sm text-black/80 cursor-pointer hover:bg-black/5 rounded px-1 py-0.5 transition-colors ml-8 ${
+                className={`font-mono text-sm cursor-pointer rounded px-1 py-0.5 transition-colors ml-8 ${
                   task.completed ? "line-through" : ""
                 }`}
-                onClick={() => startEditing('description')}
+                style={{ 
+                  color: textColor, 
+                  opacity: 0.8,
+                  ...(textColor === "#000000" ? { "--hover-bg": "rgba(0,0,0,0.05)" } : { "--hover-bg": "rgba(255,255,255,0.1)" })
+                }}
+                onMouseEnter={(e) => {
+                  if (textColor === "#000000") {
+                    e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.05)"
+                  } else {
+                    e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.1)"
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "transparent"
+                }}
+                onClick={isSelectMode ? undefined : () => startEditing('description')}
               >
                 {task.description}
               </p>
@@ -383,7 +520,22 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
                 }`}
               >
                 <p 
-                  className="font-mono text-sm text-black/40 cursor-pointer hover:bg-black/5 rounded px-1 py-0.5 italic"
+                  className="font-mono text-sm cursor-pointer rounded px-1 py-0.5 italic"
+                  style={{ 
+                    color: textColor, 
+                    opacity: 0.4,
+                    ...(textColor === "#000000" ? { "--hover-bg": "rgba(0,0,0,0.05)" } : { "--hover-bg": "rgba(255,255,255,0.1)" })
+                  }}
+                  onMouseEnter={(e) => {
+                    if (textColor === "#000000") {
+                      e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.05)"
+                    } else {
+                      e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.1)"
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = "transparent"
+                  }}
                   onClick={() => startEditing('description')}
                 >
                   Enter description
