@@ -365,13 +365,29 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
         } ${
           isSelectMode 
             ? `cursor-pointer hover:scale-[1.02] ${isSelected ? "ring-2 ring-black dark:ring-white ring-offset-2" : ""}` 
-            : ""
+            : "cursor-pointer"
         }`}
         style={{ 
           backgroundColor: task.color,
           touchAction: isSelectMode ? undefined : 'none' // Critical: prevents native touch scrolling interference
         }}
-        onClick={isSelectMode ? () => onSelect?.(task.id) : undefined}
+        onClick={isSelectMode ? () => onSelect?.(task.id) : (e) => {
+          // Toggle completion when clicking on the card, but not on interactive elements
+          // The click target check ensures we don't toggle when clicking on title/description/buttons
+          const target = e.target as HTMLElement
+          // Check if click is on title, description, delete button, color picker, or checkbox
+          if (
+            target.closest('h3') || 
+            target.closest('p') || 
+            target.closest('button') || 
+            target.closest('[data-color-picker]') ||
+            target.closest('input') ||
+            target.closest('textarea')
+          ) {
+            return // Don't toggle if clicking on these elements
+          }
+          onToggleCompletion(task.id)
+        }}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
@@ -387,10 +403,12 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
                 />
               </div>
             ) : (
-              <CustomCheckbox
-                checked={task.completed}
-                onChange={() => onToggleCompletion(task.id)}
-              />
+              <div onClick={(e) => e.stopPropagation()}>
+                <CustomCheckbox
+                  checked={task.completed}
+                  onChange={() => onToggleCompletion(task.id)}
+                />
+              </div>
             )}
             {editingField === 'title' ? (
               <input
@@ -422,7 +440,12 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
                   onMouseLeave={(e) => {
                     e.currentTarget.style.backgroundColor = "transparent"
                   }}
-                  onClick={isSelectMode ? undefined : () => startEditing('title')}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (!isSelectMode) {
+                      startEditing('title')
+                    }
+                  }}
                 >
                   {task.title}
                 </h3>
@@ -434,13 +457,15 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
                         : "max-h-0 opacity-0"
                     }`}
                   >
-                    <ColorPicker
-                      currentColor={task.color}
-                      onColorChange={(newColor) => onUpdateTask(task.id, { color: newColor })}
-                      onOpenChange={setIsColorPickerOpen}
-                      side="bottom"
-                      className="h-5 w-5"
-                    />
+                    <div data-color-picker onClick={(e) => e.stopPropagation()}>
+                      <ColorPicker
+                        currentColor={task.color}
+                        onColorChange={(newColor) => onUpdateTask(task.id, { color: newColor })}
+                        onOpenChange={setIsColorPickerOpen}
+                        side="bottom"
+                        className="h-5 w-5"
+                      />
+                    </div>
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
@@ -505,42 +530,42 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
                 onMouseLeave={(e) => {
                   e.currentTarget.style.backgroundColor = "transparent"
                 }}
-                onClick={isSelectMode ? undefined : () => startEditing('description')}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (!isSelectMode) {
+                    startEditing('description')
+                  }
+                }}
               >
                 {task.description}
               </p>
             )
           ) : (
             !isSelectMode && (
-              <div 
-                className={`ml-8 transition-all duration-200 ease-in-out overflow-hidden ${
-                  isHovered 
-                    ? "max-h-8 opacity-100" 
-                    : "max-h-0 opacity-0"
-                }`}
+              <p 
+                className="font-mono text-sm cursor-pointer rounded px-1 py-0.5 italic ml-8"
+                style={{ 
+                  color: textColor, 
+                  opacity: 0.4,
+                  ...(textColor === "#000000" ? { "--hover-bg": "rgba(0,0,0,0.05)" } : { "--hover-bg": "rgba(255,255,255,0.1)" })
+                }}
+                onMouseEnter={(e) => {
+                  if (textColor === "#000000") {
+                    e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.05)"
+                  } else {
+                    e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.1)"
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "transparent"
+                }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  startEditing('description')
+                }}
               >
-                <p 
-                  className="font-mono text-sm cursor-pointer rounded px-1 py-0.5 italic"
-                  style={{ 
-                    color: textColor, 
-                    opacity: 0.4,
-                    ...(textColor === "#000000" ? { "--hover-bg": "rgba(0,0,0,0.05)" } : { "--hover-bg": "rgba(255,255,255,0.1)" })
-                  }}
-                  onMouseEnter={(e) => {
-                    if (textColor === "#000000") {
-                      e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.05)"
-                    } else {
-                      e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.1)"
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = "transparent"
-                  }}
-                  onClick={() => startEditing('description')}
-                >
-                  Enter description
-                </p>
-              </div>
+                Enter description
+              </p>
             )
           )}
         </div>

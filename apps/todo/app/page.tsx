@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { ChevronDown, Eye, EyeOff, Plus, Trash2, X, Square } from "lucide-react"
 import { AnimatePresence } from "framer-motion"
 import { useQuery, useMutation } from "convex/react"
@@ -239,11 +239,96 @@ export default function Home() {
 
   // Convex queries and mutations
   const convexTaskDocs = useQuery(api.tasks.getTasks) as Doc<"tasks">[] | undefined
-  const addTaskMutation = useMutation(api.tasks.addTask)
-  const updateTaskMutation = useMutation(api.tasks.updateTask)
-  const deleteTaskMutation = useMutation(api.tasks.deleteTask)
-  const restoreTaskMutation = useMutation(api.tasks.restoreTask)
-  const permanentlyDeleteTaskMutation = useMutation(api.tasks.permanentlyDeleteTask)
+  const addTaskMutation = useMutation(api.tasks.addTask).withOptimisticUpdate(
+    (local, args) => {
+      const tasks = local.getQuery(api.tasks.getTasks, {});
+      if (tasks === undefined) return; // Query not loaded yet
+      
+      const optimisticTask = {
+        _id: crypto.randomUUID() as any,
+        _creationTime: Date.now(),
+        clientId: args.clientId,
+        title: args.title,
+        description: args.description,
+        color: args.color,
+        dueDate: args.dueDate,
+        completed: args.completed,
+        createdAt: args.createdAt ?? Date.now(),
+        updatedAt: args.updatedAt ?? Date.now(),
+        userEmail: "", // Will be set by server
+        isDeleted: false,
+      };
+      
+      local.setQuery(api.tasks.getTasks, {}, [...tasks, optimisticTask]);
+    }
+  );
+  const updateTaskMutation = useMutation(api.tasks.updateTask).withOptimisticUpdate(
+    (local, args) => {
+      const tasks = local.getQuery(api.tasks.getTasks, {});
+      if (tasks === undefined) return;
+      
+      const next = tasks.map((task: Doc<"tasks">) => 
+        task._id === args.taskId 
+          ? { ...task, ...args, updatedAt: Date.now() }
+          : task
+      );
+      
+      local.setQuery(api.tasks.getTasks, {}, next);
+    }
+  );
+  // Store deleted task data for optimistic restore
+  const deletedTasksDataRef = useRef<Map<string, Doc<"tasks">>>(new Map());
+  
+  const deleteTaskMutation = useMutation(api.tasks.deleteTask).withOptimisticUpdate(
+    (local, args) => {
+      const tasks = local.getQuery(api.tasks.getTasks, {});
+      if (tasks === undefined) return;
+      
+      // Find and store the task data before removing it (for potential restore)
+      const taskToDelete = tasks.find((task: Doc<"tasks">) => task._id === args.taskId);
+      if (taskToDelete) {
+        deletedTasksDataRef.current.set(args.taskId, taskToDelete);
+      }
+      
+      const next = tasks.filter((task: Doc<"tasks">) => task._id !== args.taskId);
+      local.setQuery(api.tasks.getTasks, {}, next);
+    }
+  );
+  
+  const restoreTaskMutation = useMutation(api.tasks.restoreTask).withOptimisticUpdate(
+    (local, args) => {
+      const tasks = local.getQuery(api.tasks.getTasks, {});
+      if (tasks === undefined) return;
+      
+      // Get the deleted task data from our ref
+      const deletedTaskData = deletedTasksDataRef.current.get(args.taskId);
+      if (!deletedTaskData) return; // Can't optimistically restore without task data
+      
+      // Create restored task (remove isDeleted and deletedAt)
+      const restoredTask = {
+        ...deletedTaskData,
+        isDeleted: undefined,
+        deletedAt: undefined,
+        updatedAt: Date.now(),
+      };
+      
+      // Add the restored task back to the query results
+      local.setQuery(api.tasks.getTasks, {}, [...tasks, restoredTask]);
+    }
+  );
+  const permanentlyDeleteTaskMutation = useMutation(api.tasks.permanentlyDeleteTask).withOptimisticUpdate(
+    (local, args) => {
+      const tasks = local.getQuery(api.tasks.getTasks, {});
+      if (tasks === undefined) return;
+      
+      // Remove from query (permanent delete)
+      const next = tasks.filter((task: Doc<"tasks">) => task._id !== args.taskId);
+      local.setQuery(api.tasks.getTasks, {}, next);
+      
+      // Clean up the ref
+      deletedTasksDataRef.current.delete(args.taskId);
+    }
+  );
   const syncLocalTasksMutation = useMutation(api.tasks.syncLocalTasks)
   
   // Toast hook
@@ -266,73 +351,74 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
+  // Convert convexTaskDocs to Task[] format
+  const convexTasks = useMemo(() => {
+    if (!convexTaskDocs) return null;
+    return convexTaskDocs.map(fromConvexTask);
+  }, [convexTaskDocs]);
+
+  // Track previous convexTaskDocs serialization to detect actual changes
+  const prevConvexTasksSerializedRef = useRef<string | null>(null);
+
   // Sync Convex tasks to local state when authenticated
+  // With optimistic updates, convexTaskDocs updates immediately, so we sync whenever it changes
   useEffect(() => {
-    if (isAuthenticated && convexTaskDocs && !isMigrating && hasInitialized && !isDeleting) {
-      // Check if this is initial load or if we have new tasks from Convex
-      const shouldSync = tasks.length === 0 || convexTaskDocs.length > tasks.length;
-      
-      if (shouldSync) {
-        // If no tasks from Convex and onboarding tasks haven't been created yet, create them
-        if (convexTaskDocs.length === 0 && !onboardingTasksCreated) {
-          const onboardingTasks = createOnboardingTasks();
-          setTasks(onboardingTasks);
-          setOnboardingTasksCreated(true);
-          // Save onboarding tasks to Convex
-          Promise.all(
-            onboardingTasks.map(async (task) => {
-              try {
-                await addTaskMutation({
-                  clientId: task.clientId,
-                  title: task.title,
-                  description: task.description,
-                  color: task.color,
-                  dueDate: task.dueDate,
-                  completed: task.completed,
-                  createdAt: task.createdAt,
-                  updatedAt: task.updatedAt,
-                });
-              } catch (error) {
-                console.error("Failed to add onboarding task:", error);
-              }
-            })
-          ).catch((error) => {
-            console.error("Failed to create onboarding tasks:", error);
-          });
-          return;
-        }
-
-        const convexTasks: Task[] = convexTaskDocs.map(doc => {
-          // Handle migration from section to dueDate
-          let dueDate = doc.dueDate;
-          if (!dueDate && (doc as any).section && (doc as any).section.startsWith('day-')) {
-            const daysFromNow = parseInt((doc as any).section.replace('day-', ''));
-            const date = new Date();
-            date.setDate(date.getDate() + daysFromNow);
-            dueDate = formatDate(date);
-          }
-          if (!dueDate) {
-            dueDate = formatDate(new Date()); // Default to today
-          }
-
-          return {
-            id: doc._id,
-            clientId: doc.clientId,
-            _id: doc._id,
-            title: doc.title,
-            description: doc.description,
-            color: doc.color,
-            dueDate: dueDate,
-            completed: doc.completed,
-            createdAt: doc.createdAt,
-            updatedAt: doc.updatedAt,
-          };
+    if (isAuthenticated && convexTasks && !isMigrating && hasInitialized && !isDeleting) {
+      // If no tasks from Convex and onboarding tasks haven't been created yet, create them
+      if (convexTasks.length === 0 && !onboardingTasksCreated) {
+        const onboardingTasks = createOnboardingTasks();
+        setTasks(onboardingTasks);
+        setOnboardingTasksCreated(true);
+        // Save onboarding tasks to Convex
+        Promise.all(
+          onboardingTasks.map(async (task) => {
+            try {
+              await addTaskMutation({
+                clientId: task.clientId,
+                title: task.title,
+                description: task.description,
+                color: task.color,
+                dueDate: task.dueDate,
+                completed: task.completed,
+                createdAt: task.createdAt,
+                updatedAt: task.updatedAt,
+              });
+            } catch (error) {
+              console.error("Failed to add onboarding task:", error);
+            }
+          })
+        ).catch((error) => {
+          console.error("Failed to create onboarding tasks:", error);
         });
-        
+        return;
+      }
+
+      // Create a comprehensive serialization to compare all task data
+      // Sort by ID for consistent comparison
+      const sortedTasks = [...convexTasks].sort((a, b) => a.id.localeCompare(b.id));
+      const currentSerialized = JSON.stringify(
+        sortedTasks.map(t => ({
+          id: t.id,
+          _id: t._id,
+          clientId: t.clientId,
+          title: t.title,
+          description: t.description,
+          color: t.color,
+          dueDate: t.dueDate,
+          completed: t.completed,
+          createdAt: t.createdAt,
+          updatedAt: t.updatedAt,
+        }))
+      );
+      
+      // Only update if the data has actually changed
+      if (prevConvexTasksSerializedRef.current !== currentSerialized) {
+        prevConvexTasksSerializedRef.current = currentSerialized;
         setTasks(convexTasks);
       }
     }
-  }, [isAuthenticated, convexTaskDocs, isMigrating, hasInitialized, tasks.length, isDeleting, addTaskMutation]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, convexTasks, isMigrating, hasInitialized, isDeleting, onboardingTasksCreated]);
 
   // Initialize app with local-first logic
   useEffect(() => {
@@ -508,8 +594,8 @@ export default function Home() {
 
       if (hasSession) {
         try {
-          setSyncStatus("syncing");
-          const insertedId = await addTaskMutation({
+          // Optimistic update happens automatically via withOptimisticUpdate
+          await addTaskMutation({
             clientId: localTask.clientId,
             title: localTask.title,
             description: localTask.description,
@@ -519,35 +605,23 @@ export default function Home() {
             createdAt: localTask.createdAt,
             updatedAt: localTask.updatedAt,
           });
-
-          if (insertedId) {
-            localTask._id = insertedId;
-            localTask.id = insertedId;
-          }
-
-          // Update state without localStorage when authenticated
-          setTasks((prev) => {
-            const next = [...prev, localTask];
-            // Don't save to localStorage - Convex is source of truth
-            return next;
-          });
-          setSyncStatus("synced");
+          // No need to manually update state - query will update via real-time subscription
         } catch (error) {
           console.error("Failed to add task to Convex:", error);
-          setSyncStatus("error");
           toast({
             title: "Cloud sync failed",
             description: "Failed to add task.",
             variant: "destructive",
           });
+          // Fallback: add to local state on error
           setTasks((prev) => {
             const next = [...prev, localTask];
-            // Fallback to localStorage on error
             saveLocalTasks(next);
             return next;
           });
         }
       } else {
+        // Unauthenticated: use local state
         setTasks((prev) => {
           const next = [...prev, localTask];
           saveLocalTasks(next);
@@ -592,7 +666,7 @@ export default function Home() {
 
       if (isAuthenticated) {
         try {
-          setSyncStatus("syncing");
+          // Optimistic updates happen automatically via withOptimisticUpdate
           for (const task of newOrder) {
             if (task._id) {
               await updateTaskMutation({
@@ -601,10 +675,8 @@ export default function Home() {
               });
             }
           }
-          setSyncStatus("synced");
         } catch (error) {
           console.error("Failed to sync task order:", error);
-          setSyncStatus("error");
           toast({
             title: "Sync Error",
             description: "Failed to sync task order.",
@@ -625,70 +697,55 @@ export default function Home() {
       return;
     }
     
-    const movedTask: Task = { ...taskToMove, dueDate: targetDueDate };
-    
-    setTasks((prev) => {
-      const next = prev.map((task) => {
-        if (task.id === taskId) {
-          return movedTask
-        }
-        return task
-      })
-      
-      // Only save to localStorage if NOT authenticated
-      if (!isAuthenticated) {
-        saveLocalTasks(next)
+    if (isAuthenticated && taskToMove._id) {
+      try {
+        // Optimistic update happens automatically via withOptimisticUpdate
+        await updateTaskMutation({
+          taskId: taskToMove._id,
+          dueDate: targetDueDate,
+        })
+      } catch (error) {
+        console.error("Failed to sync task move:", error)
+        toast({
+          title: "Sync Error",
+          description: "Failed to sync task move.",
+          variant: "destructive",
+        })
       }
-      
-      return next
-    })
-
-    if (isAuthenticated && movedTask) {
-      if (movedTask._id) {
-        try {
-          setSyncStatus("syncing")
-          await updateTaskMutation({
-            taskId: movedTask._id,
-            dueDate: targetDueDate,
-          })
-          setSyncStatus("synced")
-        } catch (error) {
-          console.error("Failed to sync task move:", error)
-          setSyncStatus("error")
-          toast({
-            title: "Sync Error",
-            description: "Failed to sync task move. Changes saved locally.",
-            variant: "destructive",
-          })
-        }
-      } else {
-        try {
-          setSyncStatus("syncing")
-          const insertedId = await addTaskMutation({
-            clientId: movedTask.clientId,
-            title: movedTask.title,
-            description: movedTask.description,
-            color: movedTask.color,
-            dueDate: movedTask.dueDate,
-            completed: movedTask.completed,
-            createdAt: movedTask.createdAt,
-            updatedAt: Date.now(),
-          })
-          if (insertedId) {
-            const replacements: Record<string, Id<"tasks">> = { [movedTask.id]: insertedId }
-            setTasks((prev) => replaceTaskIds(prev, replacements))
+    } else if (isAuthenticated && !taskToMove._id) {
+      // Task doesn't have _id yet, need to create it
+      try {
+        await addTaskMutation({
+          clientId: taskToMove.clientId,
+          title: taskToMove.title,
+          description: taskToMove.description,
+          color: taskToMove.color,
+          dueDate: targetDueDate,
+          completed: taskToMove.completed,
+          createdAt: taskToMove.createdAt,
+          updatedAt: Date.now(),
+        })
+      } catch (error) {
+        console.error("Failed to sync new task move:", error)
+        toast({
+          title: "Sync Error",
+          description: "Failed to sync task move.",
+          variant: "destructive",
+        })
+      }
+    } else {
+      // Unauthenticated: use local state
+      const movedTask: Task = { ...taskToMove, dueDate: targetDueDate };
+      setTasks((prev) => {
+        const next = prev.map((task) => {
+          if (task.id === taskId) {
+            return movedTask
           }
-          setSyncStatus("synced")
-        } catch (error) {
-          console.error("Failed to sync new task move:", error)
-          setSyncStatus("error")
-          toast({
-            title: "Sync Error",
-            description: "Failed to sync task move. Working locally.",
-            variant: "destructive",
-          })
-        }
-      }
+          return task
+        })
+        saveLocalTasks(next)
+        return next
+      })
     }
   }, [session?.user, updateTaskMutation, toast, addTaskMutation, tasks])
 
@@ -701,70 +758,55 @@ export default function Home() {
       return;
     }
     
-    const toggledTask: Task = { ...taskToToggle, completed: !taskToToggle.completed };
-    
-    setTasks((prev) => {
-      const next = prev.map((task) => {
-        if (task.id === taskId) {
-          return toggledTask
-        }
-        return task
-      })
-      
-      // Only save to localStorage if NOT authenticated
-      if (!isAuthenticated) {
-        saveLocalTasks(next)
+    if (isAuthenticated && taskToToggle._id) {
+      try {
+        // Optimistic update happens automatically via withOptimisticUpdate
+        await updateTaskMutation({
+          taskId: taskToToggle._id,
+          completed: !taskToToggle.completed,
+        })
+      } catch (error) {
+        console.error("Failed to sync task completion:", error)
+        toast({
+          title: "Sync Error",
+          description: "Failed to sync task completion.",
+          variant: "destructive",
+        })
       }
-      
-      return next
-    })
-
-    if (isAuthenticated && toggledTask) {
-      if (toggledTask._id) {
-        try {
-          setSyncStatus("syncing")
-          await updateTaskMutation({
-            taskId: toggledTask._id,
-            completed: toggledTask.completed,
-          })
-          setSyncStatus("synced")
-        } catch (error) {
-          console.error("Failed to sync task completion:", error)
-          setSyncStatus("error")
-          toast({
-            title: "Sync Error",
-            description: "Failed to sync task completion. Changes saved locally.",
-            variant: "destructive",
-          })
-        }
-      } else {
-        try {
-          setSyncStatus("syncing")
-          const insertedId = await addTaskMutation({
-            clientId: toggledTask.clientId,
-            title: toggledTask.title,
-            description: toggledTask.description,
-            color: toggledTask.color,
-            dueDate: toggledTask.dueDate,
-            completed: toggledTask.completed,
-            createdAt: toggledTask.createdAt,
-            updatedAt: toggledTask.updatedAt,
-          })
-          if (insertedId) {
-            const replacements: Record<string, Id<"tasks">> = { [toggledTask.id]: insertedId }
-            setTasks((prev) => replaceTaskIds(prev, replacements))
+    } else if (isAuthenticated && !taskToToggle._id) {
+      // Task doesn't have _id yet, need to create it
+      try {
+        await addTaskMutation({
+          clientId: taskToToggle.clientId,
+          title: taskToToggle.title,
+          description: taskToToggle.description,
+          color: taskToToggle.color,
+          dueDate: taskToToggle.dueDate,
+          completed: !taskToToggle.completed,
+          createdAt: taskToToggle.createdAt,
+          updatedAt: taskToToggle.updatedAt,
+        })
+      } catch (error) {
+        console.error("Failed to sync local task completion:", error)
+        toast({
+          title: "Sync Error",
+          description: "Failed to sync task completion.",
+          variant: "destructive",
+        })
+      }
+    } else {
+      // Unauthenticated: use local state
+      const toggledTask: Task = { ...taskToToggle, completed: !taskToToggle.completed };
+      setTasks((prev) => {
+        const next = prev.map((task) => {
+          if (task.id === taskId) {
+            return toggledTask
           }
-          setSyncStatus("synced")
-        } catch (error) {
-          console.error("Failed to sync local task completion:", error)
-          setSyncStatus("error")
-          toast({
-            title: "Sync Error",
-            description: "Failed to sync task completion. Working locally.",
-            variant: "destructive",
-          })
-        }
-      }
+          return task
+        })
+        saveLocalTasks(next)
+        return next
+      })
     }
   }, [session?.user, updateTaskMutation, toast, addTaskMutation, tasks])
 
@@ -773,47 +815,30 @@ export default function Home() {
     const task = tasks.find(t => t.id === taskId)
     if (!task) return
 
-    const updatedTask: Task = {
-      ...task,
-      ...updates,
-      updatedAt: Date.now(),
-    }
-
-    setTasks((prev) => {
-      const next = prev.map((t) => (t.id === taskId ? updatedTask : t))
-      
-      // Only save to localStorage if NOT authenticated
-      if (!isAuthenticated) {
-        saveLocalTasks(next)
-      }
-      
-      return next
-    })
-
     if (isAuthenticated && task._id) {
       try {
-        setSyncStatus("syncing")
+        // Optimistic update happens automatically via withOptimisticUpdate
         await updateTaskMutation({
           taskId: task._id,
           ...updates,
         })
-        setSyncStatus("synced")
-        return
       } catch (error) {
         console.error("Failed to sync task update:", error)
-        setSyncStatus("error")
         toast({
           title: "Sync Error",
           description: "Failed to sync task update.",
           variant: "destructive",
         })
       }
-    }
-
-    if (isAuthenticated && !task._id) {
+    } else if (isAuthenticated && !task._id) {
+      // Task doesn't have _id yet, need to create it
+      const updatedTask: Task = {
+        ...task,
+        ...updates,
+        updatedAt: Date.now(),
+      }
       try {
-        setSyncStatus("syncing")
-        const insertedId = await addTaskMutation({
+        await addTaskMutation({
           clientId: updatedTask.clientId,
           title: updatedTask.title,
           description: updatedTask.description,
@@ -823,52 +848,38 @@ export default function Home() {
           createdAt: updatedTask.createdAt,
           updatedAt: updatedTask.updatedAt,
         })
-        if (insertedId) {
-          const replacements: Record<string, Id<"tasks">> = { [updatedTask.id]: insertedId }
-          setTasks((prev) => replaceTaskIds(prev, replacements))
-        }
-        setSyncStatus("synced")
       } catch (error) {
         console.error("Failed to sync local task update:", error)
-        setSyncStatus("error")
         toast({
           title: "Sync Error",
           description: "Failed to sync task update.",
           variant: "destructive",
         })
       }
+    } else {
+      // Unauthenticated: use local state
+      const updatedTask: Task = {
+        ...task,
+        ...updates,
+        updatedAt: Date.now(),
+      }
+      setTasks((prev) => {
+        const next = prev.map((t) => (t.id === taskId ? updatedTask : t))
+        saveLocalTasks(next)
+        return next
+      })
     }
-  }, [tasks, isAuthenticated, updateTaskMutation, toast, addTaskMutation, setTasks])
+  }, [tasks, isAuthenticated, updateTaskMutation, toast, addTaskMutation])
 
   const deleteTask = useCallback(async (taskId: string) => {
     const isAuthenticated = !!session?.user;
     const taskToDelete = tasks.find(t => t.id === taskId)
     if (!taskToDelete) return
     
-    setIsDeleting(true)
-    setTasks((prev) => prev.filter(t => t.id !== taskId))
-    
-    // Only save to localStorage if NOT authenticated
-    if (!isAuthenticated) {
-      const currentTasks = loadLocalTasks()
-      const filteredTasks = currentTasks.filter(t => t.id !== taskId)
-      saveLocalTasks(filteredTasks)
-      addDeletedTask(taskToDelete)
-      setIsDeleting(false)
-      
-      // Show toast with restore action for localStorage mode
-      toast({
-        title: "Task deleted",
-        description: taskToDelete.title,
-        action: <ToastAction altText="Restore" onClick={() => restoreTask(taskId)}>Restore</ToastAction>,
-        duration: 60000
-      })
-    }
-    
     if (isAuthenticated && taskToDelete._id) {
       try {
-        setSyncStatus("syncing")
-        // Soft delete instead of hard delete
+        setIsDeleting(true)
+        // Optimistic update happens automatically via withOptimisticUpdate
         await deleteTaskMutation({ taskId: taskToDelete._id })
         
         // Add to deleted queue for timeout management
@@ -888,7 +899,6 @@ export default function Home() {
         })
         localStorage.setItem('deletedTasksQueue', JSON.stringify(existingQueue))
         
-        setSyncStatus("synced")
         setIsDeleting(false)
         
         // Show toast with restore action
@@ -900,7 +910,6 @@ export default function Home() {
         })
       } catch (error) {
         console.error("Failed to delete task from Convex:", error)
-        setSyncStatus("error")
         setIsDeleting(false)
         toast({
           title: "Delete Error",
@@ -908,6 +917,24 @@ export default function Home() {
           variant: "destructive",
         })
       }
+    } else {
+      // Unauthenticated: use local state
+      setIsDeleting(true)
+      setTasks((prev) => prev.filter(t => t.id !== taskId))
+      
+      const currentTasks = loadLocalTasks()
+      const filteredTasks = currentTasks.filter(t => t.id !== taskId)
+      saveLocalTasks(filteredTasks)
+      addDeletedTask(taskToDelete)
+      setIsDeleting(false)
+      
+      // Show toast with restore action for localStorage mode
+      toast({
+        title: "Task deleted",
+        description: taskToDelete.title,
+        action: <ToastAction altText="Restore" onClick={() => restoreTask(taskId)}>Restore</ToastAction>,
+        duration: 60000
+      })
     }
   }, [isAuthenticated, deleteTaskMutation, permanentlyDeleteTaskMutation, tasks, toast, session?.user])
 
@@ -957,12 +984,30 @@ export default function Home() {
       }
       
       try {
-        setSyncStatus("syncing")
+        // Store task data in ref for optimistic update (convert Task to Doc format)
+        // The optimistic update will use this data
+        const taskDoc: Doc<"tasks"> = {
+          _id: taskToRestore._id,
+          _creationTime: taskToRestore.createdAt,
+          clientId: taskToRestore.clientId,
+          title: taskToRestore.title,
+          description: taskToRestore.description,
+          color: taskToRestore.color,
+          dueDate: taskToRestore.dueDate,
+          completed: taskToRestore.completed,
+          createdAt: taskToRestore.createdAt,
+          updatedAt: taskToRestore.updatedAt,
+          userEmail: "", // Will be set by server
+          isDeleted: true, // It's currently deleted
+          deletedAt: Date.now(),
+        };
+        deletedTasksDataRef.current.set(taskToRestore._id, taskDoc);
+        
+        // Optimistic update happens automatically via withOptimisticUpdate
         await restoreTaskMutation({ taskId: taskToRestore._id })
         
-        // Instead of manually adding to state, let Convex query handle it
-        // The restored task will appear in convexTaskDocs and sync automatically
-        setSyncStatus("synced")
+        // Clean up the ref after successful restore
+        deletedTasksDataRef.current.delete(taskToRestore._id);
         
         // Show success toast
         toast({
@@ -972,7 +1017,6 @@ export default function Home() {
         })
       } catch (error) {
         console.error("Failed to restore task:", error)
-        setSyncStatus("error")
         toast({
           title: "Restore Error",
           description: "Failed to restore task from cloud.",
@@ -1060,15 +1104,32 @@ export default function Home() {
       }
       
       try {
-        setSyncStatus("syncing")
-        
-        // Restore each task
+        // Store task data in ref for optimistic updates
         for (const task of tasksToRestore) {
-          await restoreTaskMutation({ taskId: task._id! })
+          const taskDoc: Doc<"tasks"> = {
+            _id: task._id!,
+            _creationTime: task.createdAt,
+            clientId: task.clientId,
+            title: task.title,
+            description: task.description,
+            color: task.color,
+            dueDate: task.dueDate,
+            completed: task.completed,
+            createdAt: task.createdAt,
+            updatedAt: task.updatedAt,
+            userEmail: "", // Will be set by server
+            isDeleted: true, // It's currently deleted
+            deletedAt: Date.now(),
+          };
+          deletedTasksDataRef.current.set(task._id!, taskDoc);
         }
         
-        // Let Convex query handle updating the UI state
-        setSyncStatus("synced")
+        // Restore each task (optimistic updates happen automatically)
+        for (const task of tasksToRestore) {
+          await restoreTaskMutation({ taskId: task._id! })
+          // Clean up the ref after each successful restore
+          deletedTasksDataRef.current.delete(task._id!);
+        }
         
         // Show success toast
         toast({
@@ -1077,7 +1138,6 @@ export default function Home() {
           duration: 3000
         })
       } catch (error) {
-        setSyncStatus("error")
         toast({
           title: "Restore Error",
           description: "Failed to restore tasks from cloud.",
@@ -1478,10 +1538,10 @@ export default function Home() {
                     />
                     <button
                       onClick={cancelSelectMode}
-                      className="rounded-lg border border-border p-2 md:pr-[0.75rem] hover:bg-accent transition-colors flex items-center gap-2 font-mono text-sm bg-background"
+                      className="rounded-lg border border-border p-2 pr-2 md:pr-[0.75rem] hover:bg-accent transition-colors flex items-center justify-center md:justify-start gap-2 font-mono text-sm bg-background"
                       disabled={isMigrating}
                     >
-                      <X className="h-4 w-4" />
+                      <X className="h-4 w-4 flex-shrink-0" />
                       <span className="hidden md:inline">Cancel</span>
                     </button>
                   </div>
