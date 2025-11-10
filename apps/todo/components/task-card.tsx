@@ -541,31 +541,56 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
               </p>
             )
           ) : (
-            !isSelectMode && (
-              <p 
-                className="font-mono text-sm cursor-pointer rounded px-1 py-0.5 italic ml-8"
-                style={{ 
-                  color: textColor, 
-                  opacity: 0.4,
-                  ...(textColor === "#000000" ? { "--hover-bg": "rgba(0,0,0,0.05)" } : { "--hover-bg": "rgba(255,255,255,0.1)" })
-                }}
-                onMouseEnter={(e) => {
-                  if (textColor === "#000000") {
-                    e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.05)"
-                  } else {
-                    e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.1)"
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = "transparent"
-                }}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  startEditing('description')
-                }}
-              >
-                Enter description
-              </p>
+            editingField === 'description' ? (
+              <textarea
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onBlur={saveEdit}
+                className="font-mono text-sm bg-transparent border-0 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none p-0 w-full resize-none ml-8"
+                style={{ color: textColor, opacity: 0.8 }}
+                autoFocus
+                rows={2}
+              />
+            ) : (
+              !isSelectMode && (
+                <div 
+                  className={`ml-8 transition-all duration-200 ease-in-out overflow-hidden ${
+                    isHovered 
+                      ? "max-h-8 opacity-100" 
+                      : "max-h-0 opacity-0"
+                  }`}
+                >
+                  <p 
+                    className={`font-mono text-sm cursor-pointer rounded px-1 py-0.5 italic ${
+                      task.completed ? "line-through" : ""
+                    }`}
+                    style={{ 
+                      color: textColor,
+                      opacity: 0.4,
+                      ...(textColor === "#000000" ? { "--hover-bg": "rgba(0,0,0,0.05)" } : { "--hover-bg": "rgba(255,255,255,0.1)" })
+                    }}
+                    onMouseEnter={(e) => {
+                      if (textColor === "#000000") {
+                        e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.05)"
+                      } else {
+                        e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.1)"
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "transparent"
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (!isSelectMode) {
+                        startEditing('description')
+                      }
+                    }}
+                  >
+                    Enter description
+                  </p>
+                </div>
+              )
             )
           )}
         </div>
