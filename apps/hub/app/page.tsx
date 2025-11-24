@@ -7,7 +7,7 @@ import dynamic from "next/dynamic"
 const ClientBottomBar = dynamic(() => import("@/components/client-bottom-bar").then(mod => ({ default: mod.ClientBottomBar })), {
   ssr: false,
   loading: () => (
-    <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-4 md:px-0 z-50">
+    <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-8 z-50">
       <div className="mx-auto max-w-2xl">
         <div className="flex items-center justify-start">
           <div className="flex items-center gap-2">
@@ -22,10 +22,10 @@ const ClientBottomBar = dynamic(() => import("@/components/client-bottom-bar").t
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-background pb-12">
+    <main className="min-h-screen bg-background p-8 pb-12">
       {/* Header */}
       <header>
-        <div className="max-w-2xl mx-auto py-6 px-4 md:px-0">
+        <div className="max-w-2xl mx-auto">
           <div className="flex items-center justify-between">
             <h1 className="font-mono text-2xl font-bold text-foreground">
               Caalm
@@ -36,16 +36,16 @@ export default function Home() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-2xl mx-auto pb-12 pt-4">
+      <div className="max-w-2xl mx-auto pb-12 pt-4">
         {/* Hero Section */}
-        <section className="mb-12 px-4 md:px-0">
+        <section className="mb-12">
           <p className="font-mono text-lg text-muted-foreground leading-relaxed">
             Suite of thoughtfully crafted productivity tools designed for simplicity and focus.
           </p>
         </section>
 
         {/* Apps Grid */}
-        <section className="px-4 md:px-0">
+        <section>
           <div className="space-y-6">
             
             <AppCard
@@ -61,10 +61,10 @@ export default function Home() {
             />
           </div>
         </section>
-      </main>
+      </div>
 
       {/* Bottom Bar */}
       <ClientBottomBar />
-    </div>
+    </main>
   )
 }

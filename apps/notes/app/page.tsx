@@ -77,7 +77,6 @@ export default function Home() {
   const [showHistory, setShowHistory] = useState(false)
   const [formData, setFormData] = useState({ title: "", content: "" })
   const [hasInitialized, setHasInitialized] = useState(false)
-  const [isMigrating, setIsMigrating] = useState(false)
   const [deletedNotesQueue, setDeletedNotesQueue] = useState<Array<{note: Note, timeoutId: NodeJS.Timeout}>>([])
   const contentRef = useRef<HTMLDivElement>(null)
   const prevNotesSerializedRef = useRef<string>("")
@@ -95,6 +94,7 @@ export default function Home() {
   const hasSession = Boolean(session?.user)
   const isAuthenticated = hasSession
   const isLoading = isPending
+  const sessionIdentifier = session?.user?.id ?? session?.user?.email ?? null
   
   // Use the adapter hook that combines Convex realtime with TanStack Query caching
   const { notes: notesFromAdapter, isRealtime } = useJournalNotes()
@@ -133,7 +133,7 @@ export default function Home() {
 
   // Update notes when adapter data changes (handles both cached and live data)
   useEffect(() => {
-    if (!hasInitialized || isMigrating) return
+    if (!hasInitialized) return
 
     // Update notes when adapter data changes (handles both cached and live data)
     if (notesFromAdapter.length > 0 || (isAuthenticated && isRealtime)) {
@@ -160,7 +160,7 @@ export default function Home() {
         }
       }
     }
-  }, [notesFromAdapter, isAuthenticated, isRealtime, isMigrating, hasInitialized])
+  }, [notesFromAdapter, isAuthenticated, isRealtime, hasInitialized])
 
   // Initialize app with local-first logic
   useEffect(() => {
@@ -171,114 +171,107 @@ export default function Home() {
     
     // Only load local notes if not authenticated (to avoid overriding Convex data)
     if (!isAuthenticated) {
-    const localNotes = loadLocalNotes()
-    setNotes(localNotes)
-    
-    // Try to restore the current note
-    const currentNoteId = loadCurrentNoteId()
-    if (currentNoteId) {
-      const noteToRestore = localNotes.find(note => note.id === currentNoteId)
-      if (noteToRestore) {
-        setCurrentNote(noteToRestore)
-        setFormData({ title: noteToRestore.title, content: noteToRestore.content })
-        
-        // Set content in contentEditable div
-        if (contentRef.current) {
-          contentRef.current.innerHTML = noteToRestore.content
+      const localNotes = loadLocalNotes()
+      setNotes(localNotes)
+      
+      // Try to restore the current note
+      const currentNoteId = loadCurrentNoteId()
+      if (currentNoteId) {
+        const noteToRestore = localNotes.find(note => note.id === currentNoteId)
+        if (noteToRestore) {
+          setCurrentNote(noteToRestore)
+          setFormData({ title: noteToRestore.title, content: noteToRestore.content })
+          
+          // Set content in contentEditable div
+          if (contentRef.current) {
+            contentRef.current.innerHTML = noteToRestore.content
+          }
         }
       }
-    }
     }
     // If authenticated, notes will come from the adapter (cached or live)
     setHasInitialized(true)
   }, [hasInitialized, isAuthenticated, isLoading])
 
-  // Migration effect - runs once when user first authenticates
+  // Trigger a local-to-cloud sync every time the user signs in
   useEffect(() => {
-    if (!hasSession || isLoading || !hasInitialized || isMigrating) return
+    if (!isAuthenticated || isLoading || !sessionIdentifier) return
 
-    const userId = session?.user?.id ?? session?.user?.email
-    if (!userId) return
+    let cancelled = false
 
-    const migrationFlagKey = `notes:migrated:${userId}`
-    const migrationFlag = typeof window !== "undefined" ? localStorage.getItem(migrationFlagKey) : null
-    if (migrationFlag === "true") return
+    const syncNotes = async () => {
+      const localNotes = loadLocalNotes()
+      if (localNotes.length === 0) {
+        return
+      }
 
-    // Set migration flag BEFORE loading notes to prevent race conditions
-    // This prevents autoSave from creating notes during migration
-    setIsMigrating(true)
+      try {
+        const idMapping = await syncLocalNotesMutation({
+          notes: localNotes.map((note) => ({
+            id: note.id,
+            title: note.title,
+            content: note.content,
+            createdAt: note.createdAt,
+            updatedAt: note.updatedAt,
+          })),
+        })
 
-    // Capture current React state notes before loading from localStorage
-    // This allows us to merge any notes created during the brief window before isMigrating was set
-    const currentStateNotes = notes
+        if (cancelled) return
 
-    const localNotes = loadLocalNotes()
-    if (localNotes.length === 0) {
-      localStorage.setItem(migrationFlagKey, "true")
-      setIsMigrating(false)
-      return
-    }
-
-    syncLocalNotesMutation({
-      notes: localNotes.map((note) => ({
-        id: note.id, // Local UUID used as clientId
-        title: note.title,
-        content: note.content,
-        createdAt: note.createdAt,
-        updatedAt: note.updatedAt,
-      })),
-    })
-      .then((idMapping) => {
-        // Update local notes with Convex IDs using the mapping
-        const updatedLocalNotes = localNotes.map((note) => {
+        const remappedLocalNotes = localNotes.map((note) => {
           const convexId = idMapping[note.id]
-          if (convexId) {
-            return { ...note, id: convexId } // Replace local UUID with Convex ID
+          if (convexId && note.id !== convexId) {
+            return { ...note, id: convexId }
           }
           return note
         })
-        
-        // Merge with any notes that were created in React state during migration
-        // These are notes that were created after localNotes was loaded but before isMigrating was set
-        const notesCreatedDuringMigration = currentStateNotes.filter(
-          (stateNote) => !localNotes.some((localNote) => localNote.id === stateNote.id)
-        )
-        
-        // Combine migrated notes with notes created during migration
-        const finalNotes = [...updatedLocalNotes, ...notesCreatedDuringMigration]
-        
-        // Save updated notes with Convex IDs
-        saveLocalNotes(finalNotes)
-        
-        // Update current note if it was migrated
-        if (currentNote) {
-          const convexId = idMapping[currentNote.id]
-          if (convexId) {
-            setCurrentNote({ ...currentNote, id: convexId })
-            saveCurrentNoteId(convexId)
+
+        saveLocalNotes(remappedLocalNotes)
+
+        setNotes((prevNotes) => {
+          if (prevNotes.length === 0) {
+            return remappedLocalNotes
           }
-        }
-        
-        // Update notes state with merged notes
-        setNotes(finalNotes)
-        
-        localStorage.setItem(migrationFlagKey, "true")
-        setIsMigrating(false)
-        toast({
-          title: "Notes synced",
-          description: "Your notes have been synced to the cloud.",
+
+          let hasChanges = false
+          const updatedNotes = prevNotes.map((note) => {
+            const convexId = idMapping[note.id]
+            if (convexId && note.id !== convexId) {
+              hasChanges = true
+              return { ...note, id: convexId }
+            }
+            return note
+          })
+
+          return hasChanges ? updatedNotes : prevNotes
         })
-      })
-      .catch((error) => {
-        console.error("Migration failed", error)
-        setIsMigrating(false)
+
+        setCurrentNote((prev) => {
+          if (!prev) return prev
+          const convexId = idMapping[prev.id]
+          if (convexId && prev.id !== convexId) {
+            const updated = { ...prev, id: convexId }
+            saveCurrentNoteId(convexId)
+            return updated
+          }
+          return prev
+        })
+      } catch (error) {
+        console.error("Failed to sync local notes", error)
         toast({
-          title: "Sync Error",
-          description: "Failed to sync notes. You can retry by signing in again.",
+          title: "Sync error",
+          description: "We couldn't sync your offline notes. Please try again later.",
           variant: "destructive",
         })
-      })
-  }, [hasSession, isLoading, hasInitialized, syncLocalNotesMutation, session, toast, isMigrating, notes, currentNote])
+      }
+    }
+
+    syncNotes()
+
+    return () => {
+      cancelled = true
+    }
+  }, [isAuthenticated, isLoading, sessionIdentifier, syncLocalNotesMutation, toast])
 
   // Auto-save function
   const autoSave = useCallback(async () => {
@@ -549,9 +542,9 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-background">
+    <main className="min-h-screen bg-background p-8 pb-24">
       {/* Main writing area */}
-      <div className="max-w-2xl mx-auto py-8">
+      <div className="max-w-2xl mx-auto">
         <div className="space-y-6">
           {/* Title input with theme toggle */}
           <div className="flex items-center justify-between">
@@ -711,7 +704,7 @@ export default function Home() {
       <AnimatePresence>
         {showHistory && (
           <div className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50">
-            <div className="max-w-2xl mx-auto py-8 pb-[200px]">
+            <div className="max-w-2xl mx-auto py-8 pb-[200px] px-8">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold tracking-tight text-balance font-mono">Saved Notes</h2>
                 <ThemeToggle />
@@ -770,7 +763,7 @@ export default function Home() {
 
       {/* Sticky Bottom UI */}
       <div 
-        className={`fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-50 transition-transform duration-300 ease-in-out ${
+        className={`fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-8 z-50 transition-transform duration-300 ease-in-out ${
           isFocusMode ? 'translate-y-full' : 'translate-y-0'
         }`}
       >

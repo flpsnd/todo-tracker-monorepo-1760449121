@@ -178,6 +178,7 @@ export default function Home() {
   const [deletedTasksQueue, setDeletedTasksQueue] = useState<Array<{ task: Task; timeoutId: NodeJS.Timeout | null }>>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const [onboardingTasksCreated, setOnboardingTasksCreated] = useState(false);
+  const [manualSyncTrigger, setManualSyncTrigger] = useState(0);
 
   // Select mode state
   const [isSelectMode, setIsSelectMode] = useState(false)
@@ -288,6 +289,7 @@ export default function Home() {
 
   // Track previous tasks serialization to detect actual changes
   const prevTasksSerializedRef = useRef<string | null>(null);
+  const prevAuthStateRef = useRef<boolean>(isAuthenticated);
 
   // Sync tasks from adapter to local state
   // The adapter provides cached data immediately, then live data when available
@@ -347,10 +349,31 @@ export default function Home() {
       if (prevTasksSerializedRef.current !== currentSerialized) {
         prevTasksSerializedRef.current = currentSerialized;
         setTasks(tasksFromAdapter);
+        if (tasksFromAdapter.length > 0) {
+          saveLocalTasks(tasksFromAdapter.map(ensureLocalTask));
+        }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasksFromAdapter, isAuthenticated, isRealtime, isMigrating, hasInitialized, isDeleting, onboardingTasksCreated]);
+  // When signing out, persist the latest cloud tasks back to local storage
+  useEffect(() => {
+    if (prevAuthStateRef.current && !isAuthenticated) {
+      const latestTasks =
+        tasksFromAdapter.length > 0
+          ? tasksFromAdapter
+          : tasks.length > 0
+            ? tasks
+            : loadLocalTasks();
+
+      if (latestTasks.length > 0) {
+        const normalized = latestTasks.map(ensureLocalTask);
+        saveLocalTasks(normalized);
+        setTasks(normalized);
+      }
+    }
+    prevAuthStateRef.current = isAuthenticated;
+  }, [isAuthenticated, tasksFromAdapter, tasks]);
 
   // Initialize app with local-first logic
   useEffect(() => {
@@ -375,72 +398,82 @@ export default function Home() {
     setHasInitialized(true)
   }, [hasInitialized, isAuthenticated, isLoading])
 
-  // Migration effect - runs once when user first authenticates
+  // Sync any local-only tasks every time the user signs in
   useEffect(() => {
-    if (!isAuthenticated || isLoading || !hasInitialized) return
-
-    const userId = sessionUserIdentifier
-    if (!userId) return
-
-    const migrationFlagKey = `todo:migrated:${userId}`
-    const migrationFlag = typeof window !== "undefined" ? localStorage.getItem(migrationFlagKey) : null
-    if (migrationFlag === "true") return
-
-    const localTasks = loadLocalTasks()
-    if (localTasks.length === 0) {
-      localStorage.setItem(migrationFlagKey, "true")
-      return
+    if (!isAuthenticated || isLoading || !hasInitialized || !sessionUserIdentifier) {
+      return;
     }
 
-    setIsMigrating(true)
-    setPendingMigrationCount(localTasks.length)
-    setMigrationError(null)
+    const localTasks = loadLocalTasks();
+    if (localTasks.length === 0) {
+      setIsMigrating(false);
+      setPendingMigrationCount(0);
+      setMigrationError(null);
+      return;
+    }
 
-    syncLocalTasksMutation({
-      tasks: localTasks.map((task) => {
-        // Convert old section format (day-0, day-1, etc.) to proper dates
-        let dueDate: string;
-        if (task.section && task.section.startsWith('day-')) {
-          const daysFromNow = parseInt(task.section.replace('day-', ''));
-          const date = new Date();
-          date.setDate(date.getDate() + daysFromNow);
-          dueDate = formatDate(date);
-        } else {
-          // If it's already a date string, use it; otherwise default to today
-          dueDate = task.dueDate || formatDate(new Date());
-        }
-        
-        return {
-          clientId: task.clientId,
-          title: task.title,
-          description: task.description,
-          color: task.color,
-          dueDate: dueDate,
-          completed: task.completed,
-          createdAt: task.createdAt,
-          updatedAt: task.updatedAt,
-        };
-      }),
-    })
+    let cancelled = false;
+
+    setIsMigrating(true);
+    setPendingMigrationCount(localTasks.length);
+    setMigrationError(null);
+
+    const normalizedTasks = localTasks.map((task) => {
+      let dueDate: string;
+      if (task.section && task.section.startsWith("day-")) {
+        const daysFromNow = parseInt(task.section.replace("day-", ""));
+        const date = new Date();
+        date.setDate(date.getDate() + daysFromNow);
+        dueDate = formatDate(date);
+      } else {
+        dueDate = task.dueDate || formatDate(new Date());
+      }
+
+      return {
+        clientId: task.clientId,
+        title: task.title,
+        description: task.description,
+        color: task.color,
+        dueDate,
+        completed: task.completed,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+      };
+    });
+
+    syncLocalTasksMutation({ tasks: normalizedTasks })
       .then(() => {
-        clearLocalTasks()
-        localStorage.setItem(migrationFlagKey, "true")
-        setIsMigrating(false)
-        setPendingMigrationCount(0)
-        setSyncStatus("synced")
+        if (cancelled) return;
+        clearLocalTasks();
+        setIsMigrating(false);
+        setPendingMigrationCount(0);
+        setSyncStatus("synced");
       })
       .catch((error) => {
-        console.error("Migration failed", error)
-        setMigrationError("Cloud sync failed. Working locally.")
-        setIsMigrating(false)
-        setSyncStatus("error")
+        if (cancelled) return;
+        console.error("Sync failed", error);
+        setMigrationError("Cloud sync failed. Working locally.");
+        setIsMigrating(false);
+        setSyncStatus("error");
         toast({
-          title: "Migration Error",
-          description: "Failed to migrate tasks. You can retry from settings.",
+          title: "Sync Error",
+          description: "Failed to sync tasks. You can retry from settings.",
           variant: "destructive",
-        })
-      })
-  }, [isAuthenticated, isLoading, hasInitialized, syncLocalTasksMutation, sessionUserIdentifier, toast])
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isAuthenticated,
+    isLoading,
+    hasInitialized,
+    sessionUserIdentifier,
+    syncLocalTasksMutation,
+    toast,
+    manualSyncTrigger,
+  ]);
 
   // Overdue task migration - runs when date changes (midnight detection)
   useEffect(() => {
@@ -1274,13 +1307,8 @@ export default function Home() {
   }
 
   const retryMigration = useCallback(() => {
-    if (!sessionUserIdentifier) return
-    const userId = sessionUserIdentifier
-    if (!userId) return
-    localStorage.removeItem(`todo:migrated:${userId}`)
-    setMigrationError(null)
-    setIsMigrating(false)
-  }, [sessionUserIdentifier])
+    setManualSyncTrigger((prev) => prev + 1);
+  }, [])
 
   const sections = Array.from({ length: 30 }, (_, i) => getDayInfo(i))
 
@@ -1409,7 +1437,7 @@ export default function Home() {
         </div>
 
         <div
-          className={`fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-40 transition-transform duration-300 ease-in-out ${
+          className={`fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-8 z-40 transition-transform duration-300 ease-in-out ${
             isFocusMode || isDragging ? "translate-y-full" : "translate-y-0"
           }`}
         >

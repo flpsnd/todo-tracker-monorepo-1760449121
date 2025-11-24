@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useMutation } from "convex/react"
-import { api } from "../convex/_generated/api"
+import { api } from "@/convex/_generated/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -53,7 +53,7 @@ export function ClientBottomBar() {
 
   if (!isMounted) {
     return (
-      <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-4 md:px-0 z-50">
+      <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-8 z-50">
         <div className="mx-auto max-w-2xl">
           <div className="flex items-center justify-start">
             <form className="flex items-center gap-2">
@@ -64,9 +64,9 @@ export function ClientBottomBar() {
                 disabled
               />
               <Button 
-                size="sm"
                 disabled
-                className="font-mono"
+                variant="outline"
+                className="font-mono h-9"
               >
                 Subscribe
               </Button>
@@ -79,7 +79,7 @@ export function ClientBottomBar() {
 
   if (isSubmitted) {
     return (
-      <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-4 md:px-0 z-50">
+      <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-8 z-50">
         <div className="mx-auto max-w-2xl">
           <div className="flex items-center justify-start">
             <p className="font-mono text-sm text-muted-foreground">
@@ -92,7 +92,7 @@ export function ClientBottomBar() {
   }
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-4 md:px-0 z-50">
+    <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-8 z-50">
       <div className="mx-auto max-w-2xl">
         <div className="flex items-center justify-start">
           <form onSubmit={handleSubmit} className="flex items-center gap-2">
@@ -106,9 +106,8 @@ export function ClientBottomBar() {
             />
             <Button 
               type="submit" 
-              size="sm"
               disabled={isSubmitting || !email}
-              className="font-mono"
+              className="font-mono h-9"
             >
               {isSubmitting ? "..." : "Subscribe"}
             </Button>

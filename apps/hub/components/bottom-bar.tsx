@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useMutation } from "convex/react"
-import { api } from "../convex/_generated/api"
+import { api } from "@/convex/_generated/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -54,7 +54,7 @@ export function BottomBar() {
 
   if (isSubmitted) {
     return (
-      <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-50">
+      <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-8 z-50">
         <div className="mx-auto max-w-2xl">
           <div className="flex items-center justify-center">
             <p className="font-mono text-sm text-muted-foreground">
@@ -67,7 +67,7 @@ export function BottomBar() {
   }
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-50">
+    <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-8 z-50">
       <div className="mx-auto max-w-2xl">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center">
@@ -87,9 +87,8 @@ export function BottomBar() {
             />
             <Button 
               type="submit" 
-              size="sm"
               disabled={isSubmitting || !email}
-              className="font-mono"
+              className="font-mono h-9"
             >
               {isSubmitting ? "..." : "Subscribe"}
             </Button>
