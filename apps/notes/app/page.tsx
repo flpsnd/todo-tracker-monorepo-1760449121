@@ -1,11 +1,11 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react"
-import { Plus, Eye, EyeOff, Trash2, X, ChevronLeft } from "lucide-react"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { Plus, Eye, Trash2, ChevronLeft } from "lucide-react"
 import { AnimatePresence } from "framer-motion"
 import { useMutation } from "convex/react"
 import { api } from "@/convex/_generated/api"
-import { Doc, Id } from "@/convex/_generated/dataModel"
+import { Id } from "@/convex/_generated/dataModel"
 import { useSession } from "@/lib/auth-client"
 import { useJournalNotes } from "@/lib/convex-query-adapter"
 import { loadLocalNotes, saveLocalNotes, addDeletedNote, removeDeletedNote, getDeletedNotes, saveCurrentNoteId, loadCurrentNoteId, type Note } from "@/lib/local-storage"
@@ -13,7 +13,6 @@ import { ThemeToggle } from "@/components/theme-toggle"
 import { AuthButton } from "@/components/auth-button"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { Toaster } from "@/components/ui/toaster"
 import { useToast } from "@/components/ui/use-toast"
 import { ToastAction } from "@/components/ui/toast"
@@ -98,7 +97,7 @@ export default function Home() {
   const isLoading = isPending
   
   // Use the adapter hook that combines Convex realtime with TanStack Query caching
-  const { notes: notesFromAdapter, isLoading: isLoadingNotes, isRealtime } = useJournalNotes()
+  const { notes: notesFromAdapter, isRealtime } = useJournalNotes()
   
   // Create a ref to track notes from adapter for deletion checks
   const notesFromAdapterRef = useRef<Note[]>([])
@@ -594,7 +593,7 @@ export default function Home() {
                 if (!selection || selection.rangeCount === 0) return
                 
                 const range = selection.getRangeAt(0)
-                let node = range.startContainer
+                const node = range.startContainer
                 
                 // Get the current div element
                 let divElement: HTMLElement | null = null

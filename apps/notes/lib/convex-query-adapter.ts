@@ -3,7 +3,7 @@
 import { useQuery } from "convex/react"
 import { useQuery as useRQ, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/convex/_generated/api"
-import { Doc, Id } from "@/convex/_generated/dataModel"
+import { Doc } from "@/convex/_generated/dataModel"
 import { useEffect, useMemo } from "react"
 import type { Note } from "@/lib/local-storage"
 
@@ -71,7 +71,7 @@ export function useJournalNotes() {
   const cachedNotes = useMemo(() => getCachedNotes(), [])
 
   // 3) TanStack Query for cross-page cache and loading states
-  const { data: rqNotes, isLoading, isFetching } = useRQ({
+  const { data: rqNotes } = useRQ({
     queryKey: ["journalNotes"],
     queryFn: async () => {
       // This function is mainly for initial hydration

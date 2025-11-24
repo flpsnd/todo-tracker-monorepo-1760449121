@@ -1,3 +1,4 @@
+import fs from "fs";
 import path from "path";
 
 /** @type {import('next').NextConfig} */
@@ -15,7 +16,11 @@ const nextConfig = {
     // Resolve @/convex/* alias to the shared convex directory at repo root
     // This ensures webpack can find the files during build, matching tsconfig paths
     // On Vercel, process.cwd() is the app directory (apps/notes)
-    const convexPath = path.resolve(process.cwd(), "../../convex");
+    const sharedConvexPath = path.resolve(process.cwd(), "../../convex");
+    const localConvexPath = path.resolve(process.cwd(), "./convex");
+    const convexPath = fs.existsSync(sharedConvexPath)
+      ? sharedConvexPath
+      : localConvexPath;
     
     // Ensure resolve and alias objects exist
     if (!config.resolve) {

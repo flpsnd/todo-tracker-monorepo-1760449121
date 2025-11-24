@@ -20,8 +20,8 @@
       }
     ],
     "paths": {
+      "@/convex/*": ["../../convex/*", "./convex/*"],
       "@/*": ["./*"],
-      "@/convex/*": ["../../convex/*"],
       "@tanstack/react-query": [
         "./node_modules/@tanstack/react-query",
         "../todo/node_modules/@tanstack/react-query"

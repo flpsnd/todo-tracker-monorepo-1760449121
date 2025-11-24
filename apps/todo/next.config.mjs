@@ -1,4 +1,5 @@
 /** @type {import('next').NextConfig} */
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -19,7 +20,14 @@ const nextConfig = {
   webpack: (config) => {
     if (!config.resolve) config.resolve = {};
     if (!config.resolve.alias) config.resolve.alias = {};
-    config.resolve.alias["@/convex"] = path.resolve(__dirname, "../../convex");
+
+    const sharedConvexPath = path.resolve(__dirname, "../../convex");
+    const localConvexPath = path.resolve(__dirname, "./convex");
+    const convexPath = fs.existsSync(sharedConvexPath)
+      ? sharedConvexPath
+      : localConvexPath;
+
+    config.resolve.alias["@/convex"] = convexPath;
     return config;
   }
 }

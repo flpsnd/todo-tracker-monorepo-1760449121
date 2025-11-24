@@ -20,7 +20,8 @@ export function middleware(request: NextRequest) {
       "img-src 'self' data: https:",
       "font-src 'self' https://fonts.gstatic.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "script-src 'self' https://vitals.vercel-insights.com",
+      // Next.js injects critical inline scripts for bootstrapping. Allow them explicitly.
+      "script-src 'self' 'unsafe-inline' https://vitals.vercel-insights.com",
       "connect-src 'self' https://*.convex.cloud https://*.convex.site wss://*.convex.cloud https://vitals.vercel-insights.com",
       "frame-ancestors 'self'",
     ].join('; ')
