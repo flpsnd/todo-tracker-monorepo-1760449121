@@ -37,6 +37,16 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
 
+  // Journal notes table for notes app
+  journalNotes: defineTable({
+    title: v.string(),
+    content: v.string(),
+    userEmail: v.string(),
+    clientId: v.string(), // Local UUID for mapping during migration
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_user", ["userEmail"]).index("by_user_client", ["userEmail", "clientId"]),
+
   // BetterAuth tables (merged from betterAuth/schema.ts)
   user: defineTable({
     name: v.optional(v.string()),

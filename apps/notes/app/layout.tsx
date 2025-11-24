@@ -4,7 +4,7 @@ import { GeistSans } from "geist/font/sans"
 import { GeistMono } from "geist/font/mono"
 import { Analytics } from "@vercel/analytics/next"
 import { ThemeProvider } from "@/components/theme-provider"
-import { ConvexClientProvider } from "@/lib/convex-provider"
+import { Providers } from "@/components/providers"
 import { Suspense } from "react"
 import "./globals.css"
 
@@ -16,6 +16,9 @@ export const metadata: Metadata = {
   },
 }
 
+// Force dynamic rendering to prevent static generation issues
+export const dynamic = 'force-dynamic'
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -25,14 +28,16 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable}`}>
         <Suspense fallback={null}>
-          <ConvexClientProvider>
+          <Providers>
             <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
               {children}
             </ThemeProvider>
-          </ConvexClientProvider>
+          </Providers>
         </Suspense>
         <Analytics />
       </body>
     </html>
   )
 }
+
+

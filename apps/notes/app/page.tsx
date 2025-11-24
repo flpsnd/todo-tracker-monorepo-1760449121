@@ -1,11 +1,16 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { Plus, Eye, EyeOff, Trash2, X, ChevronLeft } from "lucide-react"
 import { AnimatePresence } from "framer-motion"
-import { authClient } from "@/lib/auth-client"
+import { useMutation } from "convex/react"
+import { api } from "@/convex/_generated/api"
+import { Doc, Id } from "@/convex/_generated/dataModel"
+import { useSession } from "@/lib/auth-client"
+import { useJournalNotes } from "@/lib/convex-query-adapter"
 import { loadLocalNotes, saveLocalNotes, addDeletedNote, removeDeletedNote, getDeletedNotes, saveCurrentNoteId, loadCurrentNoteId, type Note } from "@/lib/local-storage"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { AuthButton } from "@/components/auth-button"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -73,8 +78,10 @@ export default function Home() {
   const [showHistory, setShowHistory] = useState(false)
   const [formData, setFormData] = useState({ title: "", content: "" })
   const [hasInitialized, setHasInitialized] = useState(false)
+  const [isMigrating, setIsMigrating] = useState(false)
   const [deletedNotesQueue, setDeletedNotesQueue] = useState<Array<{note: Note, timeoutId: NodeJS.Timeout}>>([])
   const contentRef = useRef<HTMLDivElement>(null)
+  const prevNotesSerializedRef = useRef<string>("")
 
   // Focus mode state
   const [isFocusMode, setIsFocusMode] = useState(() => {
@@ -84,8 +91,26 @@ export default function Home() {
     return false
   })
 
-  // Auth state
-  const { data: session } = authClient.useSession()
+  // Auth state - using Better Auth session
+  const { data: session, isPending } = useSession()
+  const hasSession = Boolean(session?.user)
+  const isAuthenticated = hasSession
+  const isLoading = isPending
+  
+  // Use the adapter hook that combines Convex realtime with TanStack Query caching
+  const { notes: notesFromAdapter, isLoading: isLoadingNotes, isRealtime } = useJournalNotes()
+  
+  // Create a ref to track notes from adapter for deletion checks
+  const notesFromAdapterRef = useRef<Note[]>([])
+  useEffect(() => {
+    notesFromAdapterRef.current = notesFromAdapter
+  }, [notesFromAdapter])
+
+  // Convex mutations
+  const addNoteMutation = useMutation(api.journalNotes.addJournalNote)
+  const updateNoteMutation = useMutation(api.journalNotes.updateJournalNote)
+  const deleteNoteMutation = useMutation(api.journalNotes.deleteJournalNote)
+  const syncLocalNotesMutation = useMutation(api.journalNotes.syncLocalJournalNotes)
   
   // Toast hook
   const { toast } = useToast()
@@ -107,11 +132,46 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
+  // Update notes when adapter data changes (handles both cached and live data)
+  useEffect(() => {
+    if (!hasInitialized || isMigrating) return
+
+    // Update notes when adapter data changes (handles both cached and live data)
+    if (notesFromAdapter.length > 0 || (isAuthenticated && isRealtime)) {
+      // Create a comprehensive serialization to compare all note data
+      const sortedNotes = [...notesFromAdapter].sort((a, b) => b.updatedAt - a.updatedAt)
+      const currentSerialized = JSON.stringify(
+        sortedNotes.map(n => ({
+          id: n.id,
+          title: n.title,
+          content: n.content,
+          createdAt: n.createdAt,
+          updatedAt: n.updatedAt,
+        }))
+      )
+        
+      // Only update if the data has actually changed
+      if (prevNotesSerializedRef.current !== currentSerialized) {
+        prevNotesSerializedRef.current = currentSerialized
+        setNotes(notesFromAdapter)
+        // Only save to localStorage if we have actual notes (don't overwrite backup with empty array)
+        // localStorage serves as an offline backup and should not lose data
+        if (notesFromAdapter.length > 0) {
+          saveLocalNotes(notesFromAdapter)
+        }
+      }
+    }
+  }, [notesFromAdapter, isAuthenticated, isRealtime, isMigrating, hasInitialized])
+
   // Initialize app with local-first logic
   useEffect(() => {
     if (hasInitialized) return
 
-    // Load notes from localStorage immediately
+    // Only initialize after auth state is determined
+    if (isLoading) return // Wait for auth to load
+    
+    // Only load local notes if not authenticated (to avoid overriding Convex data)
+    if (!isAuthenticated) {
     const localNotes = loadLocalNotes()
     setNotes(localNotes)
     
@@ -129,12 +189,100 @@ export default function Home() {
         }
       }
     }
-    
+    }
+    // If authenticated, notes will come from the adapter (cached or live)
     setHasInitialized(true)
-  }, [hasInitialized])
+  }, [hasInitialized, isAuthenticated, isLoading])
+
+  // Migration effect - runs once when user first authenticates
+  useEffect(() => {
+    if (!hasSession || isLoading || !hasInitialized || isMigrating) return
+
+    const userId = session?.user?.id ?? session?.user?.email
+    if (!userId) return
+
+    const migrationFlagKey = `notes:migrated:${userId}`
+    const migrationFlag = typeof window !== "undefined" ? localStorage.getItem(migrationFlagKey) : null
+    if (migrationFlag === "true") return
+
+    // Set migration flag BEFORE loading notes to prevent race conditions
+    // This prevents autoSave from creating notes during migration
+    setIsMigrating(true)
+
+    // Capture current React state notes before loading from localStorage
+    // This allows us to merge any notes created during the brief window before isMigrating was set
+    const currentStateNotes = notes
+
+    const localNotes = loadLocalNotes()
+    if (localNotes.length === 0) {
+      localStorage.setItem(migrationFlagKey, "true")
+      setIsMigrating(false)
+      return
+    }
+
+    syncLocalNotesMutation({
+      notes: localNotes.map((note) => ({
+        id: note.id, // Local UUID used as clientId
+        title: note.title,
+        content: note.content,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt,
+      })),
+    })
+      .then((idMapping) => {
+        // Update local notes with Convex IDs using the mapping
+        const updatedLocalNotes = localNotes.map((note) => {
+          const convexId = idMapping[note.id]
+          if (convexId) {
+            return { ...note, id: convexId } // Replace local UUID with Convex ID
+          }
+          return note
+        })
+        
+        // Merge with any notes that were created in React state during migration
+        // These are notes that were created after localNotes was loaded but before isMigrating was set
+        const notesCreatedDuringMigration = currentStateNotes.filter(
+          (stateNote) => !localNotes.some((localNote) => localNote.id === stateNote.id)
+        )
+        
+        // Combine migrated notes with notes created during migration
+        const finalNotes = [...updatedLocalNotes, ...notesCreatedDuringMigration]
+        
+        // Save updated notes with Convex IDs
+        saveLocalNotes(finalNotes)
+        
+        // Update current note if it was migrated
+        if (currentNote) {
+          const convexId = idMapping[currentNote.id]
+          if (convexId) {
+            setCurrentNote({ ...currentNote, id: convexId })
+            saveCurrentNoteId(convexId)
+          }
+        }
+        
+        // Update notes state with merged notes
+        setNotes(finalNotes)
+        
+        localStorage.setItem(migrationFlagKey, "true")
+        setIsMigrating(false)
+        toast({
+          title: "Notes synced",
+          description: "Your notes have been synced to the cloud.",
+        })
+      })
+      .catch((error) => {
+        console.error("Migration failed", error)
+        setIsMigrating(false)
+        toast({
+          title: "Sync Error",
+          description: "Failed to sync notes. You can retry by signing in again.",
+          variant: "destructive",
+        })
+      })
+  }, [hasSession, isLoading, hasInitialized, syncLocalNotesMutation, session, toast, isMigrating, notes, currentNote])
 
   // Auto-save function
-  const autoSave = useCallback(() => {
+  const autoSave = useCallback(async () => {
     if (!formData.title.trim() && !formData.content.trim()) return
 
     const noteData = {
@@ -156,6 +304,24 @@ export default function Home() {
       
       // Save current note ID
       saveCurrentNoteId(updatedNote.id)
+
+      // Sync to Convex if authenticated
+      // Check if note exists in Convex by checking if it's in the adapter notes
+      if (isAuthenticated) {
+        const noteInConvex = notesFromAdapterRef.current.find(n => n.id === currentNote.id)
+        if (noteInConvex) {
+          try {
+            await updateNoteMutation({
+              id: currentNote.id as Id<"journalNotes">,
+              title: updatedNote.title,
+              content: updatedNote.content,
+              updatedAt: updatedNote.updatedAt,
+            })
+          } catch (error) {
+            console.error("Failed to update note in Convex:", error)
+          }
+        }
+      }
     } else {
       // Create new note
       const newNote: Note = {
@@ -171,8 +337,32 @@ export default function Home() {
       
       // Save current note ID
       saveCurrentNoteId(newNote.id)
+
+      // Sync to Convex if authenticated
+      if (isAuthenticated) {
+        try {
+          const convexId = await addNoteMutation({
+            title: newNote.title,
+            content: newNote.content,
+            clientId: newNote.id, // Store local UUID as clientId for future reference
+            createdAt: newNote.createdAt,
+            updatedAt: newNote.updatedAt,
+          })
+          // Update note with Convex ID - replace local UUID with Convex ID
+          const noteWithConvexId = { ...newNote, id: convexId }
+          setCurrentNote(noteWithConvexId)
+          const updatedNotesWithConvexId = updatedNotes.map(n => 
+            n.id === newNote.id ? noteWithConvexId : n
+          )
+          setNotes(updatedNotesWithConvexId)
+          saveLocalNotes(updatedNotesWithConvexId)
+          saveCurrentNoteId(convexId)
+        } catch (error) {
+          console.error("Failed to add note to Convex:", error)
+        }
+      }
     }
-  }, [formData, currentNote, notes])
+  }, [formData, currentNote, notes, isAuthenticated, addNoteMutation, updateNoteMutation])
 
   // Auto-save on every change
   useEffect(() => {
@@ -226,7 +416,7 @@ export default function Home() {
     }
   }
 
-  const deleteNote = (noteId: string) => {
+  const deleteNote = async (noteId: string) => {
     const noteToDelete = notes.find(n => n.id === noteId)
     if (!noteToDelete) return
     
@@ -241,6 +431,19 @@ export default function Home() {
     
     // Add to localStorage deleted notes for restore functionality
     addDeletedNote(noteToDelete)
+    
+    // Delete from Convex if authenticated
+    // Check if note exists in Convex by checking if it's in the adapter notes
+    if (isAuthenticated) {
+      const noteInConvex = notesFromAdapterRef.current.find(n => n.id === noteId)
+      if (noteInConvex) {
+        try {
+          await deleteNoteMutation({ id: noteId as Id<"journalNotes"> })
+        } catch (error) {
+          console.error("Failed to delete note from Convex:", error)
+        }
+      }
+    }
     
     // Set 60s timeout for permanent deletion from deleted notes
     const timeoutId = setTimeout(() => {
@@ -328,10 +531,22 @@ export default function Home() {
   }
 
   const truncateContent = (content: string, maxLength: number = 150) => {
-    // Strip HTML tags for preview
-    const textContent = content.replace(/<[^>]*>/g, '')
-    if (textContent.length <= maxLength) return textContent
-    return textContent.substring(0, maxLength) + "..."
+    if (typeof window === 'undefined') {
+      // Server-side: simple regex strip
+      const textContent = content.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ')
+      const cleaned = textContent.replace(/\s+/g, ' ').trim()
+      if (cleaned.length <= maxLength) return cleaned
+      return cleaned.substring(0, maxLength) + "..."
+    }
+    
+    // Client-side: use DOM parsing for better accuracy
+    const tempDiv = document.createElement('div')
+    tempDiv.innerHTML = content
+    const textContent = tempDiv.textContent || tempDiv.innerText || ''
+    // Clean up any remaining HTML entities and normalize whitespace
+    const cleaned = textContent.replace(/\s+/g, ' ').trim()
+    if (cleaned.length <= maxLength) return cleaned
+    return cleaned.substring(0, maxLength) + "..."
   }
 
   return (
@@ -356,10 +571,11 @@ export default function Home() {
               />
             </div>
             <div 
-              className={`transition-transform duration-300 ease-in-out ${
+              className={`flex items-center gap-2 transition-transform duration-300 ease-in-out ${
                 isFocusMode ? '-translate-y-[200%]' : 'translate-y-0'
               }`}
             >
+              <AuthButton />
               <ThemeToggle />
             </div>
           </div>
@@ -535,7 +751,7 @@ export default function Home() {
                         </div>
                         
                         <div className="font-mono text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap line-clamp-3">
-                          {note.content}
+                          {truncateContent(note.content)}
                         </div>
                         
                         <div className="mt-4 text-xs text-muted-foreground font-mono">

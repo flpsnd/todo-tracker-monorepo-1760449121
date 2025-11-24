@@ -224,7 +224,7 @@ export function clearLocalTasks(): void {
 ```typescript
 // app/page.tsx (or your main component)
 import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api";
+import { api } from "../../convex/_generated/api";
 import { useSession } from "@/lib/auth-client";
 
 export default function Page() {

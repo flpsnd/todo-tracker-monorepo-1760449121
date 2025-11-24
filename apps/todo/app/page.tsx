@@ -1,13 +1,13 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { ChevronDown, Eye, EyeOff, Plus, Trash2, X, Square } from "lucide-react"
 import { AnimatePresence } from "framer-motion"
 import { useMutation } from "convex/react"
 import { api } from "@/convex/_generated/api"
 import { useSession, signOut } from "@/lib/auth-client"
 import { Doc, Id } from "@/convex/_generated/dataModel"
-import { useTasks } from "@/lib/convex-query-adapter"
+import { useTasks, clearCachedTasks } from "@/lib/convex-query-adapter"
 import { TasksSkeleton } from "@/components/tasks-skeleton"
 import {
   loadLocalTasks,
@@ -26,7 +26,6 @@ import { DeleteConfirmationDialog } from "@/components/delete-confirmation-dialo
 import { Toaster } from "@/components/ui/toaster"
 import { useToast } from "@/components/ui/use-toast"
 import { ToastAction } from "@/components/ui/toast"
-import { Button } from "@/components/ui/button"
 import { ColorPicker } from "@/components/color-picker"
 import { ErrorBoundary } from "@/components/error-boundary"
 
@@ -41,6 +40,7 @@ export interface Task {
   completed: boolean;
   createdAt: number;
   updatedAt: number;
+  section?: string; // Legacy field for older local tasks
 }
 
 function getOrdinalSuffix(day: number): string {
@@ -56,46 +56,18 @@ function getOrdinalSuffix(day: number): string {
 }
 
 function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD format
-}
-
-function getDateInfo(dateString: string) {
-  const date = new Date(dateString + 'T00:00:00'); // Ensure local timezone
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  
-  const diffTime = date.getTime() - today.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  
-  const dayName = date.toLocaleDateString("en-US", { weekday: "long" })
-  
-  let title: string
-  if (diffDays === 0) {
-    title = "Tasks for today"
-  } else if (diffDays === 1) {
-    title = "Tasks for tomorrow"
-  } else if (diffDays === -1) {
-    title = "Tasks for yesterday"
-  } else if (diffDays > 0 && diffDays <= 6) {
-    title = `Tasks for ${dayName}`
-  } else {
-    const day = date.getDate()
-    const month = date.toLocaleDateString("en-US", { month: "long" })
-    const ordinalSuffix = getOrdinalSuffix(day)
-    title = `Tasks for ${dayName}, ${day}${ordinalSuffix} ${month}`
-  }
-  
-  return {
-    key: dateString,
-    title,
-    date,
-    diffDays,
-  }
+  // Format date in user's local timezone (YYYY-MM-DD)
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function getDayInfo(daysFromNow: number) {
+  // Get date in local timezone, set to midnight for consistency
   const date = new Date()
   date.setDate(date.getDate() + daysFromNow)
+  date.setHours(0, 0, 0, 0) // Set to midnight in local timezone
   const dayName = date.toLocaleDateString("en-US", { weekday: "long" })
   
   let title: string
@@ -120,46 +92,6 @@ function getDayInfo(daysFromNow: number) {
   }
 }
 
-function fromConvexTask(task: Doc<"tasks">): Task {
-  // Handle migration from section to dueDate
-  let dueDate = task.dueDate;
-  if (!dueDate && (task as any).section && (task as any).section.startsWith('day-')) {
-    const daysFromNow = parseInt((task as any).section.replace('day-', ''));
-    const date = new Date();
-    date.setDate(date.getDate() + daysFromNow);
-    dueDate = formatDate(date);
-  }
-  if (!dueDate) {
-    dueDate = formatDate(new Date()); // Default to today
-  }
-
-  return {
-    id: task._id,
-    _id: task._id,
-    clientId: task.clientId,
-    title: task.title,
-    description: task.description,
-    color: task.color,
-    dueDate: dueDate,
-    completed: task.completed,
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt,
-  }
-}
-
-function replaceTaskIds(tasks: Task[], replacements: Record<string, Id<"tasks">>): Task[] {
-  return tasks.map(task => {
-    if (replacements[task.id]) {
-      return {
-        ...task,
-        id: replacements[task.id],
-        _id: replacements[task.id],
-      }
-    }
-    return task
-  })
-}
-
 function createLocalTask(partial: {
   id?: string;
   clientId?: string;
@@ -181,8 +113,37 @@ function createLocalTask(partial: {
   };
 }
 
+const DELETED_QUEUE_STORAGE_KEY = "deletedTasksQueue";
+
+type PersistedDeletedTask = {
+  task: Task;
+  deletedAt: number;
+};
+
+function readDeletedTasksQueue(): PersistedDeletedTask[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const serialized = localStorage.getItem(DELETED_QUEUE_STORAGE_KEY);
+    if (!serialized) {
+      return [];
+    }
+    const parsed = JSON.parse(serialized) as PersistedDeletedTask[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeDeletedTasksQueue(entries: PersistedDeletedTask[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(DELETED_QUEUE_STORAGE_KEY, JSON.stringify(entries));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 function createOnboardingTasks(): Task[] {
-  const today = formatDate(new Date());
   return [
     createLocalTask({
       title: "Create new tasks",
@@ -209,12 +170,12 @@ export default function Home() {
   const [hoveredSection, setHoveredSection] = useState<string | null>(null)
   const [isFormOpen, setIsFormOpen] = useState(true)
   const [showCompleted, setShowCompleted] = useState(true)
-  const [syncStatus, setSyncStatus] = useState<"local-only" | "syncing" | "synced" | "error">("local-only")
+  const [, setSyncStatus] = useState<"local-only" | "syncing" | "synced" | "error">("local-only")
   const [hasInitialized, setHasInitialized] = useState(false)
   const [isMigrating, setIsMigrating] = useState(false)
   const [migrationError, setMigrationError] = useState<string | null>(null)
   const [pendingMigrationCount, setPendingMigrationCount] = useState(0)
-  const [deletedTasksQueue, setDeletedTasksQueue] = useState<Array<{ task: Task; timeoutId: NodeJS.Timeout }>>([]);
+  const [deletedTasksQueue, setDeletedTasksQueue] = useState<Array<{ task: Task; timeoutId: NodeJS.Timeout | null }>>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const [onboardingTasksCreated, setOnboardingTasksCreated] = useState(false);
 
@@ -233,14 +194,26 @@ export default function Home() {
 
   // Auth state - using Better Auth session
   const { data: session, isPending } = useSession()
-  const hasSession = Boolean(session?.user)
-  const isAuthenticated = hasSession
+  const sessionUserIdentifier = session?.user?.id ?? session?.user?.email ?? null
+  const isAuthenticated = Boolean(sessionUserIdentifier)
   const isLoading = isPending
   
+  const previousUserIdentifierRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (
+      previousUserIdentifierRef.current &&
+      previousUserIdentifierRef.current !== sessionUserIdentifier
+    ) {
+      clearCachedTasks(previousUserIdentifierRef.current)
+    }
+    previousUserIdentifierRef.current = sessionUserIdentifier ?? null
+  }, [sessionUserIdentifier])
+
   // Auth state is managed by Better Auth hooks
 
   // Use the new adapter hook that combines Convex realtime with TanStack Query caching
-  const { tasks: tasksFromAdapter, isLoading: isLoadingTasks, isRealtime } = useTasks()
+  const { tasks: tasksFromAdapter, isLoading: isLoadingTasks, isRealtime } = useTasks(sessionUserIdentifier)
 
   // Convex mutations
   const addTaskMutation = useMutation(api.tasks.addTask).withOptimisticUpdate(
@@ -249,7 +222,7 @@ export default function Home() {
       if (tasks === undefined) return; // Query not loaded yet
       
       const optimisticTask = {
-        _id: crypto.randomUUID() as any,
+        _id: crypto.randomUUID() as Id<"tasks">,
         _creationTime: Date.now(),
         clientId: args.clientId,
         title: args.title,
@@ -404,9 +377,9 @@ export default function Home() {
 
   // Migration effect - runs once when user first authenticates
   useEffect(() => {
-    if (!hasSession || isLoading || !hasInitialized) return
+    if (!isAuthenticated || isLoading || !hasInitialized) return
 
-    const userId = session?.user?.id ?? session?.user?.email
+    const userId = sessionUserIdentifier
     if (!userId) return
 
     const migrationFlagKey = `todo:migrated:${userId}`
@@ -427,8 +400,8 @@ export default function Home() {
       tasks: localTasks.map((task) => {
         // Convert old section format (day-0, day-1, etc.) to proper dates
         let dueDate: string;
-        if ((task as any).section && (task as any).section.startsWith('day-')) {
-          const daysFromNow = parseInt((task as any).section.replace('day-', ''));
+        if (task.section && task.section.startsWith('day-')) {
+          const daysFromNow = parseInt(task.section.replace('day-', ''));
           const date = new Date();
           date.setDate(date.getDate() + daysFromNow);
           dueDate = formatDate(date);
@@ -449,7 +422,7 @@ export default function Home() {
         };
       }),
     })
-      .then((result) => {
+      .then(() => {
         clearLocalTasks()
         localStorage.setItem(migrationFlagKey, "true")
         setIsMigrating(false)
@@ -467,7 +440,7 @@ export default function Home() {
           variant: "destructive",
         })
       })
-  }, [hasSession, isLoading, hasInitialized, syncLocalTasksMutation, session, toast])
+  }, [isAuthenticated, isLoading, hasInitialized, syncLocalTasksMutation, sessionUserIdentifier, toast])
 
   // Overdue task migration - runs when date changes (midnight detection)
   useEffect(() => {
@@ -486,7 +459,7 @@ export default function Home() {
       );
       
       if (overdueTasks.length > 0) {
-        const isAuthenticated = !!session?.user;
+        const isAuthenticatedUser = isAuthenticated;
         
         // Update tasks to today's date
         const updatedTasks = tasks.map(task => {
@@ -499,7 +472,7 @@ export default function Home() {
         setTasks(updatedTasks);
         
         // Sync to Convex if authenticated
-        if (isAuthenticated) {
+        if (isAuthenticatedUser) {
           try {
             setSyncStatus("syncing");
             for (const task of overdueTasks) {
@@ -546,13 +519,13 @@ export default function Home() {
     
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
-  }, [hasInitialized, tasks, isAuthenticated, updateTaskMutation, toast, session?.user]);
+  }, [hasInitialized, tasks, isAuthenticated, updateTaskMutation, toast]);
 
   const addTask = useCallback(
     async (task: Omit<Task, "id" | "clientId" | "dueDate" | "completed" | "createdAt" | "updatedAt" | "_id">) => {
       const localTask = createLocalTask(task);
 
-      if (hasSession) {
+      if (isAuthenticated) {
         try {
           // Optimistic update happens automatically via withOptimisticUpdate
           await addTaskMutation({
@@ -589,13 +562,11 @@ export default function Home() {
         });
       }
     },
-    [hasSession, addTaskMutation, toast]
+    [isAuthenticated, addTaskMutation, toast]
   );
 
   const updateTaskOrder = useCallback(
     async (dueDate: string, newOrder: Task[]) => {
-      const isAuthenticated = !!session?.user;
-
       const prevDateTasks = tasks.filter((t) => t.dueDate === dueDate);
       const newOrderIds = newOrder.map((task) => task.id);
       const prevIds = prevDateTasks.map((task) => task.id);
@@ -645,12 +616,10 @@ export default function Home() {
         }
       }
     },
-    [session?.user, updateTaskMutation, toast, tasks]
+    [isAuthenticated, updateTaskMutation, toast, tasks]
   );
 
   const moveTaskToSection = useCallback(async (taskId: string, targetDueDate: string) => {
-    const isAuthenticated = !!session?.user;
-    
     // Find the task before updating state to avoid async issues
     const taskToMove = tasks.find(task => task.id === taskId);
     if (!taskToMove) {
@@ -707,11 +676,9 @@ export default function Home() {
         return next
       })
     }
-  }, [session?.user, updateTaskMutation, toast, addTaskMutation, tasks])
+  }, [isAuthenticated, updateTaskMutation, toast, addTaskMutation, tasks])
 
   const toggleTaskCompletion = useCallback(async (taskId: string) => {
-    const isAuthenticated = !!session?.user;
-    
     // Find the task before updating state to avoid async issues
     const taskToToggle = tasks.find(task => task.id === taskId);
     if (!taskToToggle) {
@@ -768,10 +735,9 @@ export default function Home() {
         return next
       })
     }
-  }, [session?.user, updateTaskMutation, toast, addTaskMutation, tasks])
+  }, [isAuthenticated, updateTaskMutation, toast, addTaskMutation, tasks])
 
   const updateTask = useCallback(async (taskId: string, updates: Partial<Task>) => {
-    const isAuthenticated = !!session?.user;
     const task = tasks.find(t => t.id === taskId)
     if (!task) return
 
@@ -831,93 +797,24 @@ export default function Home() {
     }
   }, [tasks, isAuthenticated, updateTaskMutation, toast, addTaskMutation])
 
-  const deleteTask = useCallback(async (taskId: string) => {
-    const isAuthenticated = !!session?.user;
-    const taskToDelete = tasks.find(t => t.id === taskId)
-    if (!taskToDelete) return
-    
-    if (isAuthenticated && taskToDelete._id) {
-      try {
-        setIsDeleting(true)
-        // Optimistic update happens automatically via withOptimisticUpdate
-        await deleteTaskMutation({ taskId: taskToDelete._id })
-        
-        // Add to deleted queue for timeout management
-        const timeoutId = setTimeout(() => {
-          // Permanently delete after 60 seconds
-          permanentlyDeleteTaskMutation({ taskId: taskToDelete._id! })
-        }, 60000)
-        
-        const queueItem = { task: taskToDelete, timeoutId }
-        setDeletedTasksQueue(prev => [...prev, queueItem])
-        
-        // Also store in localStorage for persistence across re-renders
-        const existingQueue = JSON.parse(localStorage.getItem('deletedTasksQueue') || '[]')
-        existingQueue.push({
-          task: taskToDelete,
-          deletedAt: Date.now()
-        })
-        localStorage.setItem('deletedTasksQueue', JSON.stringify(existingQueue))
-        
-        setIsDeleting(false)
-        
-        // Show toast with restore action
-        toast({
-          title: "Task deleted",
-          description: taskToDelete.title,
-          action: <ToastAction altText="Restore" onClick={() => restoreTask(taskId)}>Restore</ToastAction>,
-          duration: 60000
-        })
-      } catch (error) {
-        console.error("Failed to delete task from Convex:", error)
-        setIsDeleting(false)
-        toast({
-          title: "Delete Error",
-          description: "Failed to delete task from cloud.",
-          variant: "destructive",
-        })
-      }
-    } else {
-      // Unauthenticated: use local state
-      setIsDeleting(true)
-      setTasks((prev) => prev.filter(t => t.id !== taskId))
-      
-      const currentTasks = loadLocalTasks()
-      const filteredTasks = currentTasks.filter(t => t.id !== taskId)
-      saveLocalTasks(filteredTasks)
-      addDeletedTask(taskToDelete)
-      setIsDeleting(false)
-      
-      // Show toast with restore action for localStorage mode
-      toast({
-        title: "Task deleted",
-        description: taskToDelete.title,
-        action: <ToastAction altText="Restore" onClick={() => restoreTask(taskId)}>Restore</ToastAction>,
-        duration: 60000
-      })
-    }
-  }, [isAuthenticated, deleteTaskMutation, permanentlyDeleteTaskMutation, tasks, toast, session?.user])
-
-  const restoreTask = async (taskId: string) => {
-    const isAuthenticated = !!session?.user;
-    
+  const restoreTask = useCallback(async (taskId: string) => {
     // Clear timeout from React state
     let queueItem = deletedTasksQueue.find(item => item.task.id === taskId)
     
     // If not found in React state, check localStorage as fallback
     if (!queueItem) {
-      const localStorageQueue = JSON.parse(localStorage.getItem('deletedTasksQueue') || '[]')
-      const localStorageItem = localStorageQueue.find((item: any) => item.task.id === taskId)
+      const localStorageQueue = readDeletedTasksQueue()
+      const localStorageItem = localStorageQueue.find((item) => item.task.id === taskId)
       
       if (localStorageItem) {
         // Check if it's within 60 seconds
         const now = Date.now()
         if (now - localStorageItem.deletedAt < 60000) {
-          queueItem = { task: localStorageItem.task, timeoutId: null as any }
+          queueItem = { task: localStorageItem.task, timeoutId: null }
         } else {
           // Remove expired task from localStorage
-          const filteredQueue = localStorageQueue.filter((item: any) => item.task.id !== taskId)
-          localStorage.setItem('deletedTasksQueue', JSON.stringify(filteredQueue))
+          const filteredQueue = localStorageQueue.filter((item) => item.task.id !== taskId)
+          writeDeletedTasksQueue(filteredQueue)
           return
         }
       }
@@ -930,9 +827,9 @@ export default function Home() {
       setDeletedTasksQueue(prev => prev.filter(item => item.task.id !== taskId))
       
       // Remove from localStorage as well
-      const localStorageQueue = JSON.parse(localStorage.getItem('deletedTasksQueue') || '[]')
-      const filteredQueue = localStorageQueue.filter((item: any) => item.task.id !== taskId)
-      localStorage.setItem('deletedTasksQueue', JSON.stringify(filteredQueue))
+      const localStorageQueue = readDeletedTasksQueue()
+      const filteredQueue = localStorageQueue.filter((item) => item.task.id !== taskId)
+      writeDeletedTasksQueue(filteredQueue)
     }
     
     if (isAuthenticated) {
@@ -1007,11 +904,75 @@ export default function Home() {
         duration: 3000
       })
     }
-  }
+  }, [deletedTasksQueue, isAuthenticated, restoreTaskMutation, toast])
+
+  const deleteTask = useCallback(async (taskId: string) => {
+    const taskToDelete = tasks.find(t => t.id === taskId)
+    if (!taskToDelete) return
+    
+    if (isAuthenticated && taskToDelete._id) {
+      try {
+        setIsDeleting(true)
+        // Optimistic update happens automatically via withOptimisticUpdate
+        await deleteTaskMutation({ taskId: taskToDelete._id })
+        
+        // Add to deleted queue for timeout management
+        const timeoutId = setTimeout(() => {
+          // Permanently delete after 60 seconds
+          permanentlyDeleteTaskMutation({ taskId: taskToDelete._id! })
+        }, 60000)
+        
+        const queueItem = { task: taskToDelete, timeoutId }
+        setDeletedTasksQueue(prev => [...prev, queueItem])
+        
+        // Also store in localStorage for persistence across re-renders
+        const existingQueue = readDeletedTasksQueue()
+        existingQueue.push({
+          task: taskToDelete,
+          deletedAt: Date.now()
+        })
+        writeDeletedTasksQueue(existingQueue)
+        
+        setIsDeleting(false)
+        
+        // Show toast with restore action
+        toast({
+          title: "Task deleted",
+          description: taskToDelete.title,
+          action: <ToastAction altText="Restore" onClick={() => restoreTask(taskId)}>Restore</ToastAction>,
+          duration: 60000
+        })
+      } catch (error) {
+        console.error("Failed to delete task from Convex:", error)
+        setIsDeleting(false)
+        toast({
+          title: "Delete Error",
+          description: "Failed to delete task from cloud.",
+          variant: "destructive",
+        })
+      }
+    } else {
+      // Unauthenticated: use local state
+      setIsDeleting(true)
+      setTasks((prev) => prev.filter(t => t.id !== taskId))
+      
+      const currentTasks = loadLocalTasks()
+      const filteredTasks = currentTasks.filter(t => t.id !== taskId)
+      saveLocalTasks(filteredTasks)
+      addDeletedTask(taskToDelete)
+      setIsDeleting(false)
+      
+      // Show toast with restore action for localStorage mode
+      toast({
+        title: "Task deleted",
+        description: taskToDelete.title,
+        action: <ToastAction altText="Restore" onClick={() => restoreTask(taskId)}>Restore</ToastAction>,
+        duration: 60000
+      })
+    }
+  }, [isAuthenticated, deleteTaskMutation, permanentlyDeleteTaskMutation, tasks, toast, restoreTask])
 
   const restoreBulkTasks = async (taskIds: string[]) => {
-    const isAuthenticated = !!session?.user;
-    
     // Clear timeouts from React state for all tasks
     const tasksToRestore: Task[] = []
     for (const taskId of taskIds) {
@@ -1019,13 +980,13 @@ export default function Home() {
       
       // If not found in React state, check localStorage as fallback
       if (!queueItem) {
-        const localStorageQueue = JSON.parse(localStorage.getItem('deletedTasksQueue') || '[]')
-        const localStorageItem = localStorageQueue.find((item: any) => item.task.id === taskId)
+        const localStorageQueue = readDeletedTasksQueue()
+        const localStorageItem = localStorageQueue.find((item) => item.task.id === taskId)
         
         if (localStorageItem) {
           const now = Date.now()
           if (now - localStorageItem.deletedAt < 60000) {
-            queueItem = { task: localStorageItem.task, timeoutId: null as any }
+            queueItem = { task: localStorageItem.task, timeoutId: null }
           }
         }
       }
@@ -1037,9 +998,9 @@ export default function Home() {
         setDeletedTasksQueue(prev => prev.filter(item => item.task.id !== taskId))
         
         // Remove from localStorage as well
-        const localStorageQueue = JSON.parse(localStorage.getItem('deletedTasksQueue') || '[]')
-        const filteredQueue = localStorageQueue.filter((item: any) => item.task.id !== taskId)
-        localStorage.setItem('deletedTasksQueue', JSON.stringify(filteredQueue))
+        const localStorageQueue = readDeletedTasksQueue()
+        const filteredQueue = localStorageQueue.filter((item) => item.task.id !== taskId)
+        writeDeletedTasksQueue(filteredQueue)
         
         if (queueItem.task._id) {
           tasksToRestore.push(queueItem.task)
@@ -1072,6 +1033,7 @@ export default function Home() {
           duration: 3000
         })
       } catch (error) {
+        console.error("Failed to restore tasks from Convex:", error)
         // On error, remove the optimistically added tasks
         setTasks((prev) => {
           const restoredIds = new Set(tasksToRestore.map(t => t.id));
@@ -1168,10 +1130,10 @@ export default function Home() {
     const updatedTasks = tasks.filter(task => !selectedTaskIds.includes(task.id))
     setTasks(updatedTasks)
     
-    const isAuthenticated = !!session?.user;
+    const isAuthenticatedUser = isAuthenticated;
     
     // Only save to localStorage if NOT authenticated
-    if (!isAuthenticated) {
+    if (!isAuthenticatedUser) {
       // Remove from localStorage immediately to persist deletion
       const currentTasks = loadLocalTasks()
       const filteredTasks = currentTasks.filter(task => !selectedTaskIds.includes(task.id))
@@ -1189,7 +1151,7 @@ export default function Home() {
     for (const task of selectedTasks) {
       const timeoutId = setTimeout(() => {
         // Only remove from localStorage if NOT authenticated
-        if (!isAuthenticated) {
+        if (!isAuthenticatedUser) {
           const currentTasks = loadLocalTasks()
           const filteredTasks = currentTasks.filter(t => t.id !== task.id)
           saveLocalTasks(filteredTasks)
@@ -1199,7 +1161,7 @@ export default function Home() {
         }
         
         // Permanently delete from Convex if authenticated
-        if (isAuthenticated && task._id) {
+        if (isAuthenticatedUser && task._id) {
           permanentlyDeleteTaskMutation({ taskId: task._id })
         }
       }, 60000)
@@ -1211,7 +1173,7 @@ export default function Home() {
     setDeletedTasksQueue(prev => [...prev, ...queueItems])
     
     // Also store in localStorage for persistence across re-renders
-    const existingQueue = JSON.parse(localStorage.getItem('deletedTasksQueue') || '[]')
+    const existingQueue = readDeletedTasksQueue()
     const now = Date.now()
     selectedTasks.forEach(task => {
       existingQueue.push({
@@ -1219,10 +1181,10 @@ export default function Home() {
         deletedAt: now
       })
     })
-    localStorage.setItem('deletedTasksQueue', JSON.stringify(existingQueue))
+    writeDeletedTasksQueue(existingQueue)
     
     // If authenticated, soft delete all tasks
-    if (isAuthenticated) {
+    if (isAuthenticatedUser) {
       try {
         setSyncStatus("syncing")
         for (const task of selectedTasks) {
@@ -1264,7 +1226,6 @@ export default function Home() {
   }
 
   const handleBulkColorChange = async (newColor: string) => {
-    const isAuthenticated = !!session?.user;
     if (selectedTaskIds.length === 0) return
 
     const updatedTasks = tasks.map((task) => 
@@ -1313,13 +1274,13 @@ export default function Home() {
   }
 
   const retryMigration = useCallback(() => {
-    if (!session?.user) return
-    const userId = session.user.id ?? session.user.email
+    if (!sessionUserIdentifier) return
+    const userId = sessionUserIdentifier
     if (!userId) return
     localStorage.removeItem(`todo:migrated:${userId}`)
     setMigrationError(null)
     setIsMigrating(false)
-  }, [session])
+  }, [sessionUserIdentifier])
 
   const sections = Array.from({ length: 30 }, (_, i) => getDayInfo(i))
 
@@ -1436,7 +1397,6 @@ export default function Home() {
                 onDelete={isMigrating ? () => {} : deleteTask}
                 shouldShow={shouldShow}
                 isDragging={isDragging}
-                isCurrentSection={draggingTaskSection === dayInfo.key}
                 draggingTaskSection={draggingTaskSection}
                 hoveredSection={hoveredSection}
                 onSectionHover={setHoveredSection}

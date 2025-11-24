@@ -13,6 +13,7 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
+    "baseUrl": ".",
     "plugins": [
       {
         "name": "next"
@@ -20,7 +21,15 @@
     ],
     "paths": {
       "@/*": ["./*"],
-      "@/convex/*": ["../../convex/*"]
+      "@/convex/*": ["../../convex/*"],
+      "@tanstack/react-query": [
+        "./node_modules/@tanstack/react-query",
+        "../todo/node_modules/@tanstack/react-query"
+      ],
+      "@tanstack/react-query/*": [
+        "./node_modules/@tanstack/react-query/*",
+        "../todo/node_modules/@tanstack/react-query/*"
+      ]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

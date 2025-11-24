@@ -53,19 +53,13 @@ export function ClientBottomBar() {
 
   if (!isMounted) {
     return (
-      <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-50">
+      <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-4 md:px-0 z-50">
         <div className="mx-auto max-w-2xl">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center">
-              <p className="font-mono text-sm text-muted-foreground">
-                Sign up for news about Caalm
-              </p>
-            </div>
-            
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-start">
+            <form className="flex items-center gap-2">
               <Input
                 type="email"
-                placeholder="Enter your email"
+                placeholder="Join newsletter"
                 className="w-64 font-mono text-sm"
                 disabled
               />
@@ -76,7 +70,7 @@ export function ClientBottomBar() {
               >
                 Subscribe
               </Button>
-            </div>
+            </form>
           </div>
         </div>
       </div>
@@ -85,9 +79,9 @@ export function ClientBottomBar() {
 
   if (isSubmitted) {
     return (
-      <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-50">
+      <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-4 md:px-0 z-50">
         <div className="mx-auto max-w-2xl">
-          <div className="flex items-center justify-center">
+          <div className="flex items-center justify-start">
             <p className="font-mono text-sm text-muted-foreground">
               Thanks for subscribing! We'll keep you updated on Caalm.
             </p>
@@ -98,19 +92,13 @@ export function ClientBottomBar() {
   }
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4 z-50">
+    <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border py-4 px-4 md:px-0 z-50">
       <div className="mx-auto max-w-2xl">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center">
-            <p className="font-mono text-sm text-muted-foreground">
-              Sign up for news about Caalm
-            </p>
-          </div>
-          
+        <div className="flex items-center justify-start">
           <form onSubmit={handleSubmit} className="flex items-center gap-2">
             <Input
               type="email"
-              placeholder="Enter your email"
+              placeholder="Join caalm newsletter"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-64 font-mono text-sm"
@@ -128,7 +116,7 @@ export function ClientBottomBar() {
         </div>
         
         {error && (
-          <div className="mt-2 text-center">
+          <div className="mt-2">
             <p className="font-mono text-xs text-destructive">{error}</p>
           </div>
         )}

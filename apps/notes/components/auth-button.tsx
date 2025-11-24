@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useSession, signIn, signOut } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { LogOut } from "lucide-react";
+import { LogOut, Mail } from "lucide-react";
 
 export function AuthButton() {
   const { data: session, isPending } = useSession();
@@ -20,8 +20,7 @@ export function AuthButton() {
     setMessage("");
 
     try {
-      // Use the correct BetterAuth magic link method
-      await signIn.magicLink({ 
+      await signIn.magicLink({
         email,
         callbackURL: window.location.origin,
       });
@@ -66,14 +65,14 @@ export function AuthButton() {
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-2">
       <form onSubmit={handleSignIn} className="flex items-center gap-2">
         <Input
           type="email"
           placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="font-mono text-sm w-40"
+          className="font-mono text-sm w-48"
           required
         />
         <Button
@@ -82,14 +81,22 @@ export function AuthButton() {
           size="sm"
           className="font-mono text-sm"
         >
-          {isLoading ? "..." : "Sign in"}
+          {isLoading ? (
+            <div className="flex items-center gap-1">
+              <Mail className="h-4 w-4" />
+              Sending...
+            </div>
+          ) : (
+            "Sign in"
+          )}
         </Button>
       </form>
       {message && (
-        <div className="font-mono text-xs text-muted-foreground max-w-32 truncate">
+        <div className="font-mono text-xs text-muted-foreground max-w-56">
           {message}
         </div>
       )}
     </div>
   );
 }
+

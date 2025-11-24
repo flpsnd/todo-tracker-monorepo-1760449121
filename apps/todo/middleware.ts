@@ -13,7 +13,17 @@ export function middleware(request: NextRequest) {
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   response.headers.set(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.convex.cloud https://*.convex.site; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.convex.cloud https://*.convex.site wss://*.convex.cloud https://vitals.vercel-insights.com; frame-ancestors 'self';"
+    [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "img-src 'self' data: https:",
+      "font-src 'self' https://fonts.gstatic.com",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "script-src 'self' https://vitals.vercel-insights.com",
+      "connect-src 'self' https://*.convex.cloud https://*.convex.site wss://*.convex.cloud https://vitals.vercel-insights.com",
+      "frame-ancestors 'self'",
+    ].join('; ')
   );
   response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
 

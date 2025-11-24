@@ -3,12 +3,12 @@
 import { Reorder, useMotionValue } from "framer-motion"
 import { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { Trash2 } from "lucide-react"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { CustomCheckbox } from "@/components/ui/custom-checkbox"
 import { ColorPicker } from "@/components/color-picker"
 import { COLORS } from "@/lib/colors"
 import type { Task } from "@/app/page"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 
 interface TaskCardProps {
   task: Task
@@ -18,15 +18,15 @@ interface TaskCardProps {
   onToggleCompletion: (taskId: string) => void
   onUpdateTask: (taskId: string, updates: Partial<Task>) => void
   onDelete: (taskId: string) => void
-  currentSection: string
   isSelectMode?: boolean
   isSelected?: boolean
   onSelect?: (taskId: string) => void
 }
 
-export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onToggleCompletion, onUpdateTask, onDelete, currentSection, isSelectMode = false, isSelected = false, onSelect }: TaskCardProps) {
+export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onToggleCompletion, onUpdateTask, onDelete, isSelectMode = false, isSelected = false, onSelect }: TaskCardProps) {
   const y = useMotionValue(0)
   const cardRef = useRef<HTMLLIElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   
   // Store the target section in a ref instead of DOM attribute
   const targetSectionRef = useRef<string | null>(null)
@@ -76,12 +76,40 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
     const value = field === 'title' ? task.title : task.description
     setEditValue(value)
     setOriginalValue(value)
+    
+    // Auto-resize textarea when starting to edit description
+    if (field === 'description' && textareaRef.current) {
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto'
+          textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
+        }
+      }, 0)
+    }
+  }
+
+  // Auto-resize textarea on input
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setEditValue(e.target.value)
+    // Auto-resize
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
+    }
   }
 
   // Save the edit
   const saveEdit = () => {
-    if (editingField && editValue.trim() !== originalValue) {
-      onUpdateTask(task.id, { [editingField]: editValue.trim() })
+    if (editingField) {
+      // For description, preserve markdown formatting (don't trim all whitespace)
+      // Only trim leading/trailing whitespace, but preserve internal formatting
+      const trimmedValue = editingField === 'description' 
+        ? editValue.trimEnd().replace(/^\s+/, '') // Trim end and leading whitespace only
+        : editValue.trim()
+      
+      if (trimmedValue !== originalValue) {
+        onUpdateTask(task.id, { [editingField]: trimmedValue })
+      }
     }
     setEditingField(null)
     setEditValue('')
@@ -98,8 +126,21 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
   // Handle key down events
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
-      e.preventDefault()
-      saveEdit()
+      // For description, allow Shift+Enter for newline, Enter to submit
+      if (editingField === 'description') {
+        if (e.shiftKey) {
+          // Allow default behavior (newline)
+          return
+        } else {
+          // Submit on Enter (without Shift)
+          e.preventDefault()
+          saveEdit()
+        }
+      } else {
+        // For title, Enter always submits
+        e.preventDefault()
+        saveEdit()
+      }
     } else if (e.key === 'Escape') {
       e.preventDefault()
       cancelEdit()
@@ -196,6 +237,14 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
       }
     }
   }, [getScrollDirection, performContinuousScroll])
+
+  // Auto-resize textarea when editValue changes
+  useEffect(() => {
+    if (editingField === 'description' && textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
+    }
+  }, [editValue, editingField])
 
   useEffect(() => {
     // Update cache when component mounts
@@ -395,7 +444,7 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
           {/* Title row with checkbox */}
           <div className="flex items-center gap-3">
             {isSelectMode ? (
-              <div onClick={(e) => e.stopPropagation()}>
+              <div onClick={(e) => e.stopPropagation()} className="flex-shrink-0">
                 <CustomCheckbox
                   checked={isSelected}
                   onChange={() => onSelect?.(task.id)}
@@ -403,7 +452,7 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
                 />
               </div>
             ) : (
-              <div onClick={(e) => e.stopPropagation()}>
+              <div onClick={(e) => e.stopPropagation()} className="flex-shrink-0">
                 <CustomCheckbox
                   checked={task.completed}
                   onChange={() => onToggleCompletion(task.id)}
@@ -416,14 +465,14 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
                 onChange={(e) => setEditValue(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onBlur={saveEdit}
-                className="font-mono font-medium bg-transparent border-0 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none p-0 flex-1"
+                className="font-mono font-medium text-[16px] bg-transparent border-0 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none p-0 flex-1 min-w-0"
                 style={{ color: textColor }}
                 autoFocus
               />
             ) : (
-              <div className="flex items-center justify-between flex-1">
+              <div className="flex items-center justify-between flex-1 min-w-0">
                 <h3 
-                  className={`font-mono font-medium cursor-pointer rounded px-1 py-0.5 transition-colors ${
+                  className={`font-mono font-medium text-[18px] sm:text-base cursor-pointer rounded px-1 py-0.5 transition-colors flex-1 min-w-0 ${
                     task.completed ? "line-through" : ""
                   }`}
                   style={{ 
@@ -451,19 +500,20 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
                 </h3>
                 {!isSelectMode && (
                   <div 
-                    className={`transition-all duration-200 ease-in-out overflow-hidden flex items-center gap-2 ${
+                    className={`transition-all duration-200 ease-in-out ${isColorPickerOpen ? "overflow-visible" : "overflow-hidden"} flex items-center gap-2 flex-shrink-0 ml-2 ${
                       (isHovered || isColorPickerOpen)
                         ? "max-h-6 opacity-100" 
                         : "max-h-0 opacity-0"
                     }`}
                   >
-                    <div data-color-picker onClick={(e) => e.stopPropagation()}>
+                    <div data-color-picker onClick={(e) => e.stopPropagation()} className="flex items-center justify-center">
                       <ColorPicker
                         currentColor={task.color}
                         onColorChange={(newColor) => onUpdateTask(task.id, { color: newColor })}
                         onOpenChange={setIsColorPickerOpen}
                         side="bottom"
-                        className="h-5 w-5"
+                        className="h-5 w-5 rounded-full p-0 border-2 flex items-center justify-center"
+                        borderColor={task.color.toLowerCase() === "#000000" ? "white" : "black"}
                       />
                     </div>
                     <button
@@ -471,7 +521,7 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
                         e.stopPropagation()
                         onDelete(task.id)
                       }}
-                      className="h-5 w-5 flex items-center justify-center rounded transition-colors"
+                      className="h-5 w-5 flex items-center justify-center rounded transition-colors flex-shrink-0"
                       style={{ 
                         color: textColor,
                         ...(textColor === "#000000" 
@@ -501,23 +551,33 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
           {task.description ? (
             editingField === 'description' ? (
               <textarea
+                ref={textareaRef}
                 value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
+                onChange={handleTextareaChange}
                 onKeyDown={handleKeyDown}
                 onBlur={saveEdit}
-                className="font-mono text-sm bg-transparent border-0 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none p-0 w-full resize-none ml-8"
-                style={{ color: textColor, opacity: 0.8 }}
+                className="font-mono text-[16px] bg-transparent border-0 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none p-0 w-full resize-none overflow-hidden"
+                style={{ 
+                  color: textColor, 
+                  opacity: 0.8, 
+                  marginLeft: '30px',
+                  minHeight: '1.5rem',
+                  lineHeight: '1.5rem'
+                }}
                 autoFocus
-                rows={2}
+                rows={1}
               />
             ) : (
-              <p 
-                className={`font-mono text-sm cursor-pointer rounded px-1 py-0.5 transition-colors ml-8 ${
+              <div
+                className={`cursor-pointer rounded py-0.5 transition-colors ${
                   task.completed ? "line-through" : ""
                 }`}
                 style={{ 
                   color: textColor, 
                   opacity: 0.8,
+                  marginLeft: '30px',
+                  paddingLeft: '4px',
+                  paddingRight: '4px',
                   ...(textColor === "#000000" ? { "--hover-bg": "rgba(0,0,0,0.05)" } : { "--hover-bg": "rgba(255,255,255,0.1)" })
                 }}
                 onMouseEnter={(e) => {
@@ -537,37 +597,120 @@ export function TaskCard({ task, onDragStart, onDragEnd, onMoveToSection, onTogg
                   }
                 }}
               >
-                {task.description}
-              </p>
+                <div 
+                  className="font-mono text-[16px] sm:text-sm"
+                  style={{ color: textColor }}
+                >
+                  <ReactMarkdown 
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      p: ({ children }) => {
+                        // Don't wrap in p if it's empty or just whitespace
+                        if (!children || (Array.isArray(children) && children.length === 0)) {
+                          return <br />
+                        }
+                        return (
+                          <div style={{ display: 'block', marginBottom: '0.5rem', color: textColor }}>
+                            {children}
+                          </div>
+                        )
+                      },
+                      ul: ({ children }) => (
+                        <ul style={{ 
+                          marginLeft: '1.25rem', 
+                          marginTop: '0.25rem', 
+                          marginBottom: '0.5rem', 
+                          listStyleType: 'disc',
+                          color: textColor,
+                          paddingLeft: '0.5rem'
+                        }}>
+                          {children}
+                        </ul>
+                      ),
+                      ol: ({ children }) => (
+                        <ol style={{ 
+                          marginLeft: '1.25rem', 
+                          marginTop: '0.25rem', 
+                          marginBottom: '0.5rem', 
+                          listStyleType: 'decimal',
+                          color: textColor,
+                          paddingLeft: '0.5rem'
+                        }}>
+                          {children}
+                        </ol>
+                      ),
+                      li: ({ children }) => (
+                        <li style={{ 
+                          marginBottom: '0.25rem', 
+                          color: textColor,
+                          display: 'list-item'
+                        }}>
+                          {children}
+                        </li>
+                      ),
+                      strong: ({ children }) => (
+                        <strong style={{ fontWeight: 'bold', color: textColor }}>{children}</strong>
+                      ),
+                      em: ({ children }) => (
+                        <em style={{ fontStyle: 'italic', color: textColor }}>{children}</em>
+                      ),
+                      code: ({ children }) => (
+                        <code style={{ 
+                          fontFamily: 'monospace', 
+                          fontSize: '0.875em',
+                          color: textColor,
+                          backgroundColor: textColor === "#000000" ? "rgba(0,0,0,0.1)" : "rgba(255,255,255,0.1)",
+                          padding: '0.125rem 0.25rem',
+                          borderRadius: '0.25rem'
+                        }}>
+                          {children}
+                        </code>
+                      ),
+                    }}
+                  >
+                    {task.description}
+                  </ReactMarkdown>
+                </div>
+              </div>
             )
           ) : (
             editingField === 'description' ? (
               <textarea
+                ref={textareaRef}
                 value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
+                onChange={handleTextareaChange}
                 onKeyDown={handleKeyDown}
                 onBlur={saveEdit}
-                className="font-mono text-sm bg-transparent border-0 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none p-0 w-full resize-none ml-8"
-                style={{ color: textColor, opacity: 0.8 }}
+                className="font-mono text-[16px] bg-transparent border-0 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus:shadow-none p-0 w-full resize-none overflow-hidden"
+                style={{ 
+                  color: textColor, 
+                  opacity: 0.8, 
+                  marginLeft: '30px',
+                  minHeight: '1.5rem',
+                  lineHeight: '1.5rem'
+                }}
                 autoFocus
-                rows={2}
+                rows={1}
               />
             ) : (
               !isSelectMode && (
                 <div 
-                  className={`ml-8 transition-all duration-200 ease-in-out overflow-hidden ${
+                  className={`transition-all duration-200 ease-in-out overflow-hidden ${
                     isHovered 
                       ? "max-h-8 opacity-100" 
                       : "max-h-0 opacity-0"
                   }`}
+                  style={{ marginLeft: '30px' }}
                 >
                   <p 
-                    className={`font-mono text-sm cursor-pointer rounded px-1 py-0.5 italic ${
+                    className={`font-mono text-[16px] sm:text-sm cursor-pointer rounded py-0.5 italic ${
                       task.completed ? "line-through" : ""
                     }`}
                     style={{ 
                       color: textColor,
                       opacity: 0.4,
+                      paddingLeft: '4px',
+                      paddingRight: '4px',
                       ...(textColor === "#000000" ? { "--hover-bg": "rgba(0,0,0,0.05)" } : { "--hover-bg": "rgba(255,255,255,0.1)" })
                     }}
                     onMouseEnter={(e) => {

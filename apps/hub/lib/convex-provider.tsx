@@ -5,9 +5,10 @@ import { ConvexBetterAuthProvider } from '@convex-dev/better-auth/react';
 import { authClient } from '@/lib/auth-client';
 import { ReactNode } from 'react';
 
-// Initialize ConvexReactClient with expectAuth: true
+// Initialize ConvexReactClient without expectAuth for public hub page
+// Auth is optional - users can use the site without being authenticated
 const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!, {
-  expectAuth: true,
+  expectAuth: false,
 });
 
 export function ConvexClientProvider({ children }: { children: ReactNode }) {

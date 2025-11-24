@@ -19,6 +19,7 @@ interface ColorPickerProps {
   side?: "top" | "bottom" | "left" | "right"
   trigger?: React.ReactNode
   className?: string
+  borderColor?: string
 }
 
 export function ColorPicker({ 
@@ -28,9 +29,10 @@ export function ColorPicker({
   align = "center",
   side = "bottom",
   trigger,
-  className 
+  className,
+  borderColor
 }: ColorPickerProps) {
-  const selectedColor = COLORS.find(color => color.value === currentColor)
+  const defaultBorderColor = borderColor || (currentColor.toLowerCase() === "#000000" ? "white" : "black")
 
   return (
     <DropdownMenu onOpenChange={onOpenChange}>
@@ -39,17 +41,21 @@ export function ColorPicker({
           <Button
             variant="outline"
             size="sm"
-            className={cn("h-8 w-8 rounded-full p-0 border-2", className)}
+            className={cn("h-8 w-8 rounded-full p-0 border-2 flex items-center justify-center", className)}
             style={{
               backgroundColor: currentColor,
-              borderColor: "black",
+              borderColor: defaultBorderColor,
             }}
           >
             <span className="sr-only">Change color</span>
           </Button>
         )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={align} side={side} className="w-auto p-2">
+      <DropdownMenuContent 
+        align={align} 
+        side={side} 
+        className="w-auto p-2"
+      >
         <div className="grid grid-cols-4 gap-2">
           {COLORS.map((color) => (
             <DropdownMenuItem

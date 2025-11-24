@@ -20,12 +20,16 @@ export interface Task {
 }
 
 // Last Known Good cache using localStorage
-const LKG_CACHE_KEY = "todo:tasks:lkg"
+const LKG_CACHE_PREFIX = "todo:tasks:lkg"
+const ANONYMOUS_CACHE_KEY = "anonymous"
 
-function getCachedTasks(): Task[] {
+const buildCacheKey = (identifier?: string | null) =>
+  `${LKG_CACHE_PREFIX}:${identifier ?? ANONYMOUS_CACHE_KEY}`
+
+function getCachedTasks(cacheKey: string): Task[] {
   if (typeof window === "undefined") return []
   try {
-    const cached = localStorage.getItem(LKG_CACHE_KEY)
+    const cached = localStorage.getItem(cacheKey)
     if (!cached) return []
     const parsed = JSON.parse(cached)
     // Validate cache age (max 24 hours)
@@ -38,11 +42,11 @@ function getCachedTasks(): Task[] {
   }
 }
 
-function setCachedTasks(tasks: Task[]): void {
+function setCachedTasks(cacheKey: string, tasks: Task[]): void {
   if (typeof window === "undefined") return
   try {
     localStorage.setItem(
-      LKG_CACHE_KEY,
+      cacheKey,
       JSON.stringify({
         tasks,
         timestamp: Date.now(),
@@ -53,17 +57,30 @@ function setCachedTasks(tasks: Task[]): void {
   }
 }
 
+function formatDate(date: Date): string {
+  // Format date in user's local timezone (YYYY-MM-DD)
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function fromConvexTask(task: Doc<"tasks">): Task {
   // Handle migration from section to dueDate
   let dueDate = task.dueDate;
-  if (!dueDate && (task as any).section && (task as any).section.startsWith('day-')) {
-    const daysFromNow = parseInt((task as any).section.replace('day-', ''));
+  const legacySection = (task as { section?: unknown }).section;
+  if (
+    !dueDate &&
+    typeof legacySection === "string" &&
+    legacySection.startsWith("day-")
+  ) {
+    const daysFromNow = parseInt(legacySection.replace("day-", ""));
     const date = new Date();
     date.setDate(date.getDate() + daysFromNow);
-    dueDate = date.toISOString().split('T')[0];
+    dueDate = formatDate(date);
   }
   if (!dueDate) {
-    dueDate = new Date().toISOString().split('T')[0]; // Default to today
+    dueDate = formatDate(new Date()); // Default to today
   }
 
   return {
@@ -84,8 +101,18 @@ function fromConvexTask(task: Doc<"tasks">): Task {
  * Bridge hook that combines Convex realtime subscriptions with TanStack Query caching
  * This maintains Convex's realtime capabilities while providing instant cache access
  */
-export function useTasks() {
+export function clearCachedTasks(identifier?: string | null): void {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.removeItem(buildCacheKey(identifier))
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function useTasks(userIdentifier?: string | null) {
   const queryClient = useQueryClient()
+  const cacheKey = buildCacheKey(userIdentifier)
 
   // 1) Get live data from Convex (this maintains realtime subscription)
   const convexTaskDocs = useQuery(api.tasks.getTasks) as Doc<"tasks">[] | undefined
@@ -97,10 +124,10 @@ export function useTasks() {
   }, [convexTaskDocs])
 
   // 2) Get cached tasks from localStorage (Last Known Good)
-  const cachedTasks = useMemo(() => getCachedTasks(), [])
+  const cachedTasks = useMemo(() => getCachedTasks(cacheKey), [cacheKey])
 
   // 3) TanStack Query for cross-page cache and loading states
-  const { data: rqTasks, isLoading, isFetching } = useRQ({
+  const { data: rqTasks } = useRQ({
     queryKey: ["tasks"],
     queryFn: async () => {
       // This function is mainly for initial hydration
@@ -119,9 +146,9 @@ export function useTasks() {
     if (convexTasks) {
       queryClient.setQueryData(["tasks"], convexTasks)
       // Also update LKG cache
-      setCachedTasks(convexTasks)
+      setCachedTasks(cacheKey, convexTasks)
     }
-  }, [convexTasks, queryClient])
+  }, [cacheKey, convexTasks, queryClient])
 
   // 5) Return the best available data
   // Priority: Convex live data > TanStack cache > LKG cache

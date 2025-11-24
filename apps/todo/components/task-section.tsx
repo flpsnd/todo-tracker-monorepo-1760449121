@@ -18,7 +18,6 @@ interface TaskSectionProps {
   onDelete: (taskId: string) => void
   shouldShow: boolean
   isDragging: boolean
-  isCurrentSection: boolean
   draggingTaskSection?: string | null
   hoveredSection?: string | null
   onSectionHover?: (section: string | null) => void
@@ -40,7 +39,6 @@ export function TaskSection({
   onDelete,
   shouldShow,
   isDragging,
-  isCurrentSection,
   draggingTaskSection,
   hoveredSection,
   onSectionHover,
@@ -103,7 +101,7 @@ export function TaskSection({
     
     // When dragging, show all sections with at least 0.3 opacity for drop detection
     return 0.3
-  }, [shouldShow, isDragging, section, draggingTaskSection, hoveredSection, isHovered, isCurrentSection, getDayNumber])
+  }, [shouldShow, isDragging, section, draggingTaskSection, hoveredSection, getDayNumber])
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -141,7 +139,6 @@ export function TaskSection({
             onToggleCompletion={onToggleCompletion}
             onUpdateTask={onUpdateTask}
             onDelete={onDelete}
-            currentSection={section}
             isSelectMode={isSelectMode}
             isSelected={selectedTaskIds.includes(task.id)}
             onSelect={onSelect}

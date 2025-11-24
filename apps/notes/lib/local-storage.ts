@@ -1,5 +1,5 @@
 export interface Note {
-  id: string
+  id: string // Convex ID when synced, local UUID otherwise
   title: string
   content: string
   createdAt: number
